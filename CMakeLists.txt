@@ -1,0 +1,17 @@
+cmake_minimum_required(VERSION 2.8)
+
+PROJECT( Assignment2 )
+
+FIND_PACKAGE ( ITK REQUIRED)
+IF (  ITK_FOUND  )
+         INCLUDE(  ${ITK_USE_FILE}  )
+ENDIF(   ITK_FOUND   )
+
+FIND_PACKAGE ( VTK REQUIRED)
+IF (   VTK_FOUND   )
+         INCLUDE(  ${VTK_USE_FILE}  )
+ENDIF(   VTK_FOUND   )
+
+ADD_EXECUTABLE( Assignment2   Assignment2.cxx )
+
+TARGET_LINK_LIBRARIES ( Assignment2 ${ITK_LIBRARIES} ${VTK_LIBRARIES})
