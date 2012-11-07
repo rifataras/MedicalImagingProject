@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 2.8)
 
-PROJECT( Assignment2 )
+PROJECT( SupResTrainer )
+
+set(ITK_DIR "/home/rifat/Apps/ITK/InsightToolkit-4.2.0b/")
+set(VTK_DIR "/home/rifat/Apps/VTK5_10/VTKb/")
 
 FIND_PACKAGE ( ITK REQUIRED)
 IF (  ITK_FOUND  )
@@ -12,6 +15,6 @@ IF (   VTK_FOUND   )
          INCLUDE(  ${VTK_USE_FILE}  )
 ENDIF(   VTK_FOUND   )
 
-ADD_EXECUTABLE( Assignment2   Assignment2.cxx )
+ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx )
 
-TARGET_LINK_LIBRARIES ( Assignment2 ${ITK_LIBRARIES} ${VTK_LIBRARIES})
+TARGET_LINK_LIBRARIES ( SupResTrainer ${ITK_LIBRARIES} ${VTK_LIBRARIES})
