@@ -163,7 +163,8 @@ int main( int argc, char *argv[] )
 		_pResizeFilter->SetInput(image);
 		_pResizeFilter->Update();
 		ImageType::Pointer lores = _pResizeFilter->GetOutput();
-		_pResizeFilter->UpdateLargestPossibleRegion();
+		lores->DisconnectPipeline();
+		//_pResizeFilter->UpdateLargestPossibleRegion();
 
 		//downscaling interpolations ends
 
