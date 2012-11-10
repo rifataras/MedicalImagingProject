@@ -9,6 +9,8 @@
 #include "itkBSplineInterpolateImageFunction.h"
 #include "itkResampleImageFilter.h"
 
+#include "itkConvolutionImageFilter.h"
+
 #include "itkChangeInformationImageFilter.h"
 
 // project specific preprocessor definitions
@@ -24,9 +26,70 @@ typedef itk::ImageFileWriter< ImageType > WriterType;
 
 
 //typedefs for bicubic interpolation
-typedef itk::IdentityTransform<double, 2>  TransformType;
+typedef itk::IdentityTransform<double, 2>  IdentityTransformType;
 typedef itk::BSplineInterpolateImageFunction<ImageType, double, double> InterpolatorType;
 typedef itk::ResampleImageFilter<ImageType, ImageType>   ResampleFilterType;
+
+// typedefs for feature extraction
+typedef float						KernelElementType;
+typedef itk::Image<KernelElementType, 2>	KernelImageType;
+typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, ImageType> ConvolutionFilterType;
+
+
+void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
+		KernelImageType::Pointer kernel3,KernelImageType::Pointer kernel4,int scale)
+{
+	KernelImageType::IndexType start;
+	start.Fill(0);
+
+	//const KernelImageType::SizeType &size1 = {2 + scale - 1, 1}; // gaussian x-dir
+
+	KernelImageType::RegionType region1;
+	region1.SetSize(2 + scale - 1, 1);
+	region1.SetIndex(0, 0);
+	region1.SetIndex(1, 0);
+
+	kernel1->SetRegions(region1);
+	kernel1->Allocate();
+
+	/**/
+	KernelImageType::IndexType pixelIndex;
+	pixelIndex[0] = 0;
+	pixelIndex[1] = 0;
+	kernel1->SetPixel(pixelIndex, 3);
+	std::cout << "bb " << kernel1->GetPixel(pixelIndex);
+	for(unsigned int c = 0; c < scale - 1; c++)
+	{
+		pixelIndex[1] = c+1;
+
+		kernel1->SetPixel(pixelIndex, 5);
+		std::cout << "bv " << kernel1->GetPixel(pixelIndex);
+	}
+	pixelIndex[1] = scale;
+	kernel1->SetPixel(pixelIndex, 9);
+	std::cout << "bn " << kernel1->GetPixel(pixelIndex);
+
+	/*itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, region1);
+
+	   while(!imageIterator.IsAtEnd())
+	    {
+	    //imageIterator.Set(255);
+	    imageIterator.Set(100);
+
+	    ++imageIterator;
+	    }*/
+
+//  itk::ImageRegionIterator<ImageType> imageIterator(kernel, region);
+//
+//   while(!imageIterator.IsAtEnd())
+//    {
+//    //imageIterator.Set(255);
+//    imageIterator.Set(1);
+
+    //++imageIterator;
+    }
+
+
 
 int main( int argc, char *argv[] )
 {
@@ -43,7 +106,6 @@ int main( int argc, char *argv[] )
 	}
 
 	itksys::Directory trainDir;
-	//itk::Directory::Pointer trainDir = itk::Directory::New();
 	if(!trainDir.Load(argv[1]))
 	{
 		std::cerr << "Could not open the directory. " << std::endl;
@@ -125,9 +187,6 @@ int main( int argc, char *argv[] )
 
 		//downsampling to lores starts
 
-		// Instantiate the transform and specify it should be the id transform.
-		 TransformType::Pointer _pTransform = TransformType::New();
- 		_pTransform->SetIdentity();
 		// Instantiate the b-spline interpolator and set it as the third order
 		// for bicubic.
 		InterpolatorType::Pointer _pInterpolator = InterpolatorType::New();
@@ -135,7 +194,6 @@ int main( int argc, char *argv[] )
 
 		// Instantiate the resampler. Wire in the transform and the interpolator.
 		ResampleFilterType::Pointer _pResizeFilter = ResampleFilterType::New();
-		_pResizeFilter->SetTransform(_pTransform);
 		_pResizeFilter->SetInterpolator(_pInterpolator);
 
 		const double vfOutputOrigin[2]  = { 0.0, 0.0 };
@@ -158,76 +216,26 @@ int main( int argc, char *argv[] )
 		vfOutputSpacing[1] = vfInputSpacing[1] * (double) nOldHeight / (double) nNewHeight;
  
 		_pResizeFilter->SetOutputSpacing(vfOutputSpacing);
-		itk::Size<2> vnOutputSize = { {nNewWidth, nNewHeight} };
+		ResampleFilterType::SizeType vnOutputSize = { {nNewWidth, nNewHeight} };
 		_pResizeFilter->SetSize(vnOutputSize);
 		_pResizeFilter->SetInput(image);
 		_pResizeFilter->Update();
 		ImageType::Pointer lores = _pResizeFilter->GetOutput();
 		lores->DisconnectPipeline();
-		//_pResizeFilter->UpdateLargestPossibleRegion();
-
 		//downscaling interpolations ends
-
-
-		//upscaling with bicubic interpolation
-		//// Instantiate the transform and specify it should be the id transform.
-		////TransformType::Pointer _pTransform2 = TransformType::New();
- 	//	//_pTransform2->SetIdentity();
-		//// Instantiate the b-spline interpolator and set it as the third order
-		//// for bicubic.
-		////InterpolatorType::Pointer _pInterpolator2 = InterpolatorType::New();
-		////_pInterpolator2->SetSplineOrder(3);
-
-		//// Instantiate the resampler. Wire in the transform and the interpolator.
-		//ResampleFilterType::Pointer _pResizeFilter2 = ResampleFilterType::New();
-		//_pResizeFilter2->SetTransform(_pTransform);
-		//_pResizeFilter2->SetInterpolator(_pInterpolator);
-
-		//const double vfOutputOrigin2[2]  = { 0.0, 0.0 };
-		//_pResizeFilter2->SetOutputOrigin(vfOutputOrigin2);
-
-		//// Fetch original image size.
-		//const ImageType::RegionType& inputRegion2 = lores->GetLargestPossibleRegion();
-		//const ImageType::SizeType& vnInputSize2 = inputRegion2.GetSize();
-		//unsigned int nOldWidth2 = vnInputSize2[0];
-		//unsigned int nOldHeight2 = vnInputSize2[1];
-		//  
-		//unsigned int nNewWidth2 = vnInputSize2[0]*scale;
-		//unsigned int nNewHeight2 = vnInputSize2[1]*scale;
-
-		//// Fetch original image spacing.
-		//const ImageType::SpacingType& vfInputSpacing2 = lores->GetSpacing();
-
-		//double vfOutputSpacing2[2];
-		//vfOutputSpacing2[0] = vfInputSpacing2[0] * (double) nOldWidth2 / (double) nNewWidth2;
-		//vfOutputSpacing2[1] = vfInputSpacing2[1] * (double) nOldHeight2 / (double) nNewHeight2;
- 
-		//_pResizeFilter2->SetOutputSpacing(vfOutputSpacing2);
-		//itk::Size<2> vnOutputSize2 = { {nNewWidth2, nNewHeight2} };
-		//_pResizeFilter2->SetSize(vnOutputSize2);
-		//_pResizeFilter2->SetInput(lores);
-		//ImageType::Pointer midres = _pResizeFilter2->GetOutput();
-		//_pResizeFilter2->UpdateLargestPossibleRegion();
-
-		itk::ChangeInformationImageFilter<ImageType> ::Pointer somename = itk::ChangeInformationImageFilter<ImageType> :: New();
-		somename->SetInput(lores);
-		somename->Update();
-
-
-
 
 		const ImageType::RegionType& inputRegion2 = lores->GetLargestPossibleRegion();
 		const ImageType::SizeType& vnInputSize2 = inputRegion2.GetSize();
 		nOldWidth = vnInputSize2[0];
 		nOldHeight = vnInputSize2[1];
-		//  
+
+		// now we want to upscale the image
 		nNewWidth = vnInputSize2[0]*scale;
 		nNewHeight = vnInputSize2[1]*scale;
 		const ImageType::SpacingType& vfInputSpacingLow = lores->GetSpacing();
 		vfOutputSpacing[0] = vfInputSpacingLow[0] * (double) nOldWidth / (double) nNewWidth;
 		vfOutputSpacing[1] = vfInputSpacingLow[1] * (double) nOldHeight / (double) nNewHeight;
  
-		_pResizeFilter->SetTransform(_pTransform);
 		_pResizeFilter->SetInterpolator(_pInterpolator);
 		_pResizeFilter->SetOutputOrigin(vfOutputOrigin);
 		_pResizeFilter->SetOutputSpacing(vfOutputSpacing);
@@ -236,27 +244,54 @@ int main( int argc, char *argv[] )
 		_pResizeFilter->SetSize(vnOutputSize);
 		_pResizeFilter->UpdateLargestPossibleRegion();
 		_pResizeFilter->SetInput(lores);
-		_pResizeFilter->Modified();
 		_pResizeFilter->Update();
-		
-		
 		ImageType::Pointer midres = _pResizeFilter->GetOutput();
+		// at this point, we have the blurred versions in midres
+
+		// defining the kernels to be used for the feature extraction
+		KernelImageType::Pointer kernel1 = KernelImageType::New();
+		KernelImageType::Pointer kernel2 = KernelImageType::New();
+		KernelImageType::Pointer kernel3 = KernelImageType::New();
+		KernelImageType::Pointer kernel4 = KernelImageType::New();
+
+		CreateKernels(kernel1, kernel2, kernel3, kernel4, scale);
+		ConvolutionFilterType::Pointer convolutionFilter = ConvolutionFilterType::New();
+		convolutionFilter->SetInput(midres);
+		convolutionFilter->SetKernelImage(kernel1);
+
+//		KernelImageType::IndexType pixelIndex;
+//			pixelIndex[0] = 0;
+//
+//			for(unsigned int c = 0; c < scale + 1; c++)
+//			{
+//				pixelIndex[1] = c;
+//
+//				std::cout << kernel1->GetPixel(pixelIndex) << " ind: ";
+//				std::cout << pixelIndex[1] << " ";
+//			}
+			std::cout << std::endl;
+		KernelImageType::RegionType reg = kernel1->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, reg);
+
+		reg.SetIndex(0,0);
+		reg.SetIndex(1,0);
+
+		while(!imageIterator.IsAtEnd())
+		    {
+		    //imageIterator.Set(255);
+		    std::cout << "pix: " << imageIterator.Get() << " ";
+
+		    ++imageIterator;
+		    }
+
+
+
+
 		
-
-
-
 #ifdef FUNCTEST
 		std::cout << "TESTING SCALE DOWN FUNC: i = " << i << std::endl;
 		std::cout << "image size: " << vnInputSize << std::endl;
 		std::cout << "scale: " << scale << std::endl;		
-		std::cout << "Old Width: " << nOldWidth << std::endl;
-		std::cout << "Old Height: " << nOldHeight << std::endl;
-		std::cout << "New Width: " << nNewWidth << std::endl;
-		std::cout << "New Height: " << nNewHeight << std::endl;
-		
-		
-		std::cout << "Output image size: " << vnOutputSize << std::endl;
-		std::cout << "Output spc size: " << vfOutputSpacing[0] << std::endl;
 		
 		char *testpath = (char*)malloc(4 + strlen(filename) + 2);
 		if (testpath == NULL)
@@ -270,8 +305,8 @@ int main( int argc, char *argv[] )
 		// Write the result
 		WriterType::Pointer pWriter = WriterType::New();
 		pWriter->SetFileName(testpath);
-		pWriter->SetInput(midres);
-		pWriter->UpdateLargestPossibleRegion();
+		pWriter->SetInput(convolutionFilter->GetOutput());
+		pWriter->Update();
 		free(testpath);
 		std::cout << "**************************************" << std::endl;
 #endif
