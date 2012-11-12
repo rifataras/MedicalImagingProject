@@ -31,7 +31,7 @@ typedef itk::BSplineInterpolateImageFunction<ImageType, double, double> Interpol
 typedef itk::ResampleImageFilter<ImageType, ImageType>   ResampleFilterType;
 
 // typedefs for feature extraction
-typedef float						KernelElementType;
+typedef float					KernelElementType;
 typedef itk::Image<KernelElementType, 2>	KernelImageType;
 typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, ImageType> ConvolutionFilterType;
 
@@ -39,55 +39,97 @@ typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, ImageType> Convo
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
 		KernelImageType::Pointer kernel3,KernelImageType::Pointer kernel4,int scale)
 {
-	KernelImageType::IndexType start;
-	start.Fill(0);
-
-	//const KernelImageType::SizeType &size1 = {2 + scale - 1, 1}; // gaussian x-dir
-
-	KernelImageType::RegionType region1;
-	region1.SetSize(2 + scale - 1, 1);
-	region1.SetIndex(0, 0);
-	region1.SetIndex(1, 0);
-
+	KernelImageType::SizeType size;
+	size[0] = 2 + scale - 1;
+	size[1] = 1;
+	KernelImageType::IndexType index;
+	index[0] = 0;
+	index[1] = 0;
+	KernelImageType::RegionType region1(index,size);
 	kernel1->SetRegions(region1);
 	kernel1->Allocate();
 
-	/**/
-	KernelImageType::IndexType pixelIndex;
-	pixelIndex[0] = 0;
-	pixelIndex[1] = 0;
-	kernel1->SetPixel(pixelIndex, 3);
-	std::cout << "bb " << kernel1->GetPixel(pixelIndex);
-	for(unsigned int c = 0; c < scale - 1; c++)
+	std::vector<KernelElementType> krnlVals;
+	krnlVals.reserve(size[0]);
+
+	// Fill the values for the first and second kernels
+	krnlVals.push_back(1);
+	for(int i = 0; i < scale - 1; i++)
+		krnlVals.push_back(0);
+	krnlVals.push_back(-1);
+
+	itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, region1);
+	imageIterator.GoToBegin();
+	while(!imageIterator.IsAtEnd())
 	{
-		pixelIndex[1] = c+1;
-
-		kernel1->SetPixel(pixelIndex, 5);
-		std::cout << "bv " << kernel1->GetPixel(pixelIndex);
+		KernelImageType::IndexType currntIndex = imageIterator.GetIndex();
+		imageIterator.Set(krnlVals[currntIndex[0]]);
+		++imageIterator;
 	}
-	pixelIndex[1] = scale;
-	kernel1->SetPixel(pixelIndex, 9);
-	std::cout << "bn " << kernel1->GetPixel(pixelIndex);
 
-	/*itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, region1);
+	// second kernel
+	size[1] = 2 + scale - 1;
+	size[0] = 1;
+	index[0] = 0;
+	index[1] = 0;
+	KernelImageType::RegionType region2(index,size);
+	kernel2->SetRegions(region2);
+	kernel2->Allocate();
 
-	   while(!imageIterator.IsAtEnd())
-	    {
-	    //imageIterator.Set(255);
-	    imageIterator.Set(100);
+	itk::ImageRegionIterator<KernelImageType> imageIterator2(kernel2, region2);
+	imageIterator2.GoToBegin();
+	while(!imageIterator2.IsAtEnd())
+	{
+		KernelImageType::IndexType currntIndex = imageIterator2.GetIndex();
+		imageIterator2.Set(krnlVals[currntIndex[1]]);
+		++imageIterator2;
+	}
 
-	    ++imageIterator;
-	    }*/
+	// now fill the values for the third and fourth kernels
+	krnlVals.clear();
+	krnlVals.push_back(0.5);
+	for(int i = 0; i < scale - 1; i++)
+		krnlVals.push_back(0);
+	krnlVals.push_back(-1);
+	for(int i = 0; i < scale - 1; i++)
+		krnlVals.push_back(0);
+	krnlVals.push_back(0.5);
 
-//  itk::ImageRegionIterator<ImageType> imageIterator(kernel, region);
-//
-//   while(!imageIterator.IsAtEnd())
-//    {
-//    //imageIterator.Set(255);
-//    imageIterator.Set(1);
+	size[0] = 2 * scale + 1;
+	size[1] = 1;
+	index[0] = 0;
+	index[1] = 0;
+	KernelImageType::RegionType region3(index,size);
+	kernel3->SetRegions(region3);
+	kernel3->Allocate();
 
-    //++imageIterator;
-    }
+	itk::ImageRegionIterator<KernelImageType> imageIterator3(kernel3, region3);
+	imageIterator3.GoToBegin();
+	while(!imageIterator3.IsAtEnd())
+	{
+		KernelImageType::IndexType currntIndex = imageIterator3.GetIndex();
+		imageIterator3.Set(krnlVals[currntIndex[0]]);
+		++imageIterator3;
+	}
+
+	// fourth kernel
+	size[1] = 2 * scale + 1;
+	size[0] = 1;
+	index[0] = 0;
+	index[1] = 0;
+	KernelImageType::RegionType region4(index,size);
+	kernel4->SetRegions(region4);
+	kernel4->Allocate();
+
+	itk::ImageRegionIterator<KernelImageType> imageIterator4(kernel4, region4);
+	imageIterator4.GoToBegin();
+	while(!imageIterator4.IsAtEnd())
+	{
+		KernelImageType::IndexType currntIndex = imageIterator4.GetIndex();
+		imageIterator4.Set(krnlVals[currntIndex[1]]);
+		++imageIterator4;
+	}
+}
 
 
 
@@ -255,44 +297,69 @@ int main( int argc, char *argv[] )
 		KernelImageType::Pointer kernel4 = KernelImageType::New();
 
 		CreateKernels(kernel1, kernel2, kernel3, kernel4, scale);
-		ConvolutionFilterType::Pointer convolutionFilter = ConvolutionFilterType::New();
-		convolutionFilter->SetInput(midres);
-		convolutionFilter->SetKernelImage(kernel1);
-
-//		KernelImageType::IndexType pixelIndex;
-//			pixelIndex[0] = 0;
-//
-//			for(unsigned int c = 0; c < scale + 1; c++)
-//			{
-//				pixelIndex[1] = c;
-//
-//				std::cout << kernel1->GetPixel(pixelIndex) << " ind: ";
-//				std::cout << pixelIndex[1] << " ";
-//			}
-			std::cout << std::endl;
-		KernelImageType::RegionType reg = kernel1->GetLargestPossibleRegion();
-		itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, reg);
-
-		reg.SetIndex(0,0);
-		reg.SetIndex(1,0);
-
-		while(!imageIterator.IsAtEnd())
-		    {
-		    //imageIterator.Set(255);
-		    std::cout << "pix: " << imageIterator.Get() << " ";
-
-		    ++imageIterator;
-		    }
-
-
-
-
-		
 #ifdef FUNCTEST
-		std::cout << "TESTING SCALE DOWN FUNC: i = " << i << std::endl;
-		std::cout << "image size: " << vnInputSize << std::endl;
-		std::cout << "scale: " << scale << std::endl;		
-		
+		// print out the created kernels
+		std::cout << "Printing the created kernels:";
+		std::cout  << std::endl << "KERNEL 1:" << std::endl;
+		KernelImageType::RegionType region1 = kernel1->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator1(kernel1, region1);
+		imageIterator1.GoToBegin();
+		while(!imageIterator1.IsAtEnd())
+		{
+			std::cout << imageIterator1.Get() << ", ";
+			++imageIterator1;
+		}
+
+		std::cout  << std::endl << "KERNEL 2:" << std::endl;
+		KernelImageType::RegionType region2 = kernel2->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator2(kernel2, region2);
+		imageIterator2.GoToBegin();
+		while(!imageIterator2.IsAtEnd())
+		{
+			std::cout << imageIterator2.Get() << ", ";
+			++imageIterator2;
+		}
+
+		std::cout  << std::endl << "KERNEL 3:" << std::endl;
+		KernelImageType::RegionType region3 = kernel3->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator3(kernel3, region3);
+		imageIterator3.GoToBegin();
+		while(!imageIterator3.IsAtEnd())
+		{
+			std::cout << imageIterator3.Get() << ", ";
+			++imageIterator3;
+		}
+
+		std::cout  << std::endl << "KERNEL 4:" << std::endl;
+		KernelImageType::RegionType region4 = kernel4->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator4(kernel4, region4);
+		imageIterator4.GoToBegin();
+		while(!imageIterator4.IsAtEnd())
+		{
+			std::cout << imageIterator4.Get() << ", ";
+			++imageIterator4;
+		}
+#endif
+
+		ConvolutionFilterType::Pointer convolutionFilter1 = ConvolutionFilterType::New();
+		convolutionFilter1->SetInput(midres);
+		convolutionFilter1->SetKernelImage(kernel1);
+
+		ConvolutionFilterType::Pointer convolutionFilter2 = ConvolutionFilterType::New();
+		convolutionFilter2->SetInput(midres);
+		convolutionFilter2->SetKernelImage(kernel2);
+
+		ConvolutionFilterType::Pointer convolutionFilter3 = ConvolutionFilterType::New();
+		convolutionFilter3->SetInput(midres);
+		convolutionFilter3->SetKernelImage(kernel3);
+
+		ConvolutionFilterType::Pointer convolutionFilter4 = ConvolutionFilterType::New();
+		convolutionFilter4->SetInput(midres);
+		convolutionFilter4->SetKernelImage(kernel4);
+
+
+
+#ifdef FUNCTEST
 		char *testpath = (char*)malloc(4 + strlen(filename) + 2);
 		if (testpath == NULL)
 		{
@@ -305,7 +372,7 @@ int main( int argc, char *argv[] )
 		// Write the result
 		WriterType::Pointer pWriter = WriterType::New();
 		pWriter->SetFileName(testpath);
-		pWriter->SetInput(convolutionFilter->GetOutput());
+		pWriter->SetInput(convolutionFilter2->GetOutput());
 		pWriter->Update();
 		free(testpath);
 		std::cout << "**************************************" << std::endl;
