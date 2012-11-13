@@ -14,7 +14,7 @@
 #include "itkChangeInformationImageFilter.h"
 
 // project specific preprocessor definitions
-#define FUNCTEST // define this variable to test the functionality correctness
+//#define FUNCTEST // define this variable to test the functionality correctness
 
 
 // typedefs
@@ -34,6 +34,7 @@ typedef itk::ResampleImageFilter<ImageType, ImageType>   ResampleFilterType;
 typedef float					KernelElementType;
 typedef itk::Image<KernelElementType, 2>	KernelImageType;
 typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, ImageType> ConvolutionFilterType;
+typedef itk::ConstNeighborhoodIterator<KernelImageType> NeighborhoodIterator;
 
 
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
@@ -135,14 +136,18 @@ void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer ker
 
 int main( int argc, char *argv[] )
 {
-	// The parameters we are looking for are: 1) the directory of the training files,
-	// 2) magnification scale to train for.
-	if ( argc < 3 )
+	// The parameters we are looking for are:
+	// 1) the directory of the training files,
+	// 2) magnification scale to train for,
+	// 3) the window size (will be scaled by scale)
+	// 4) overlap amount (will be scaled by scale)
+	// 5) border of the image to ignore (will be scaled)
+	if ( argc < 6 )
 	{
 		std::cerr << "Missing parameters. " << std::endl;
 		std::cerr << "Usage: " << std::endl;
 		std::cerr << argv[0]
-		<< " directory scale"
+		<< " directory scale window overlap border"
 		<< std::endl;
 		return -1;
 	}
@@ -155,6 +160,9 @@ int main( int argc, char *argv[] )
 	}
 
 	int scale = ::atoi(argv[2]);
+	int window = ::atoi(argv[3]);
+	int overlap = ::atoi(argv[4]);
+	int border = ::atoi(argv[5]);
 
 	int numberOfFiles = trainDir.GetNumberOfFiles();
 	ReaderType::Pointer reader = ReaderType::New();
@@ -356,6 +364,45 @@ int main( int argc, char *argv[] )
 		ConvolutionFilterType::Pointer convolutionFilter4 = ConvolutionFilterType::New();
 		convolutionFilter4->SetInput(midres);
 		convolutionFilter4->SetKernelImage(kernel4);
+
+
+		// A radius of 1 in all axial directions gives a 3x3x3x3x... neighborhood.
+		NeighborhoodIterator::RadiusType radius;
+		radius.Fill(scale * window); // typically 9 by 9
+
+		// define the region for the iterator
+		// get the original image size
+		ImageType::SizeType intrstSize = midres->GetLargestPossibleRegion().GetSize();
+
+		KernelImageType::IndexType itindex;
+		itindex[0] = 3;
+		itindex[1] = 3;
+		KernelImageType::RegionType itregion(itindex,itsize);
+		NeighborhoodIterator it(radius, test, itregion);
+		it.SetNeedToUseBoundaryCondition(true);
+		NeighborhoodIterator::OffsetType offset;
+		offset[0] = 6;
+		offset[1] = 0;
+		it.GoToBegin();
+		unsigned int c = it.Size() / 2;
+		while ( ! it.IsAtEnd() )
+		{
+			std::cout << "At index " << it.GetIndex() << "center is: ";
+			std::cout << it.GetCenterPixel() << "next is: " << it.GetPixel(c+1)<< std::endl;
+			itk::Index<2> curInd = it.GetIndex();
+
+			if(curInd[0] + offset[0] >= itsize[0] + itindex[0])
+			{
+				NeighborhoodIterator::IndexType newPos;
+				newPos[0] = itindex[0];
+				newPos[1] = curInd[1] + 1;
+				it.SetLocation(newPos);
+			}
+			else
+			{
+				it += offset;
+			}
+		}
 
 
 
