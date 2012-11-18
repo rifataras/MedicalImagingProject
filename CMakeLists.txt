@@ -15,6 +15,9 @@ IF (   VTK_FOUND   )
          INCLUDE(  ${VTK_USE_FILE}  )
 ENDIF(   VTK_FOUND   )
 
-ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx )
+include_directories ("${PROJECT_SOURCE_DIR}/FeatureExtractor")
+add_subdirectory (FeatureExtractor) 
 
-TARGET_LINK_LIBRARIES ( SupResTrainer ${ITK_LIBRARIES} ${VTK_LIBRARIES})
+ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx)
+
+TARGET_LINK_LIBRARIES ( SupResTrainer FeatureExtractor ${ITK_LIBRARIES} ${VTK_LIBRARIES})

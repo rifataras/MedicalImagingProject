@@ -11,7 +11,11 @@
 
 #include "itkConvolutionImageFilter.h"
 
-#include "itkChangeInformationImageFilter.h"
+#include "ImageToFeatureConverter.h"
+#include "ImageToFeatureConverter.cxx" // !!! HACK! fix this later !!
+
+#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
+#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
 
 // project specific preprocessor definitions
 //#define FUNCTEST // define this variable to test the functionality correctness
@@ -33,8 +37,7 @@ typedef itk::ResampleImageFilter<ImageType, ImageType>   ResampleFilterType;
 // typedefs for feature extraction
 typedef float					KernelElementType;
 typedef itk::Image<KernelElementType, 2>	KernelImageType;
-typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, ImageType> ConvolutionFilterType;
-typedef itk::ConstNeighborhoodIterator<KernelImageType> NeighborhoodIterator;
+typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, KernelImageType> ConvolutionFilterType;
 
 
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
@@ -54,10 +57,10 @@ void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer ker
 	krnlVals.reserve(size[0]);
 
 	// Fill the values for the first and second kernels
-	krnlVals.push_back(1);
+	krnlVals.push_back(-1);
 	for(int i = 0; i < scale - 1; i++)
 		krnlVals.push_back(0);
-	krnlVals.push_back(-1);
+	krnlVals.push_back(1);
 
 	itk::ImageRegionIterator<KernelImageType> imageIterator(kernel1, region1);
 	imageIterator.GoToBegin();
@@ -167,6 +170,9 @@ int main( int argc, char *argv[] )
 	int numberOfFiles = trainDir.GetNumberOfFiles();
 	ReaderType::Pointer reader = ReaderType::New();
 
+	// The feature vector from the convolved images
+	std::vector<std::vector<KernelElementType> > globalFeatureMatrix;
+
 	// The big for loop in which the training images are processed
 	for(int i = 0; i < numberOfFiles; i++)
 	{
@@ -202,10 +208,30 @@ int main( int argc, char *argv[] )
 		}
 		free(fullpath);
 		
+		reader->Update();
 		ImageType::Pointer image = reader->GetOutput();
 		ImageType::RegionType region = image->GetLargestPossibleRegion();
 		ImageType::SizeType size = region.GetSize();
 		
+//		std::cout  << "*******" << std::endl << "Content of midres:" << std::endl;
+//		ImageType::RegionType midresReg = image->GetLargestPossibleRegion();
+//		itk::ImageRegionIterator<ImageType> imageIteratorMidres(image, midresReg);
+//		imageIteratorMidres.GoToBegin();
+//		int oldRow = 0;
+//		while(!imageIteratorMidres.IsAtEnd())
+//		{
+//			ImageType::IndexType curInd = imageIteratorMidres.GetIndex();
+//			if(curInd[1] != oldRow)
+//			{
+//				std::cout << std::endl;
+//				oldRow = curInd[1];
+//			}
+//			std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+//			std::cout << (unsigned int)imageIteratorMidres.Get() << " ";
+//			++imageIteratorMidres;
+//		}
+//		std::cout  << std::endl << "END Content of midres *******" << std::endl;
+
 		// First, we want to crop the file so that its horizontal
 		// and vertical sizes are multiples of the scale value (modcrop)
 		ImageType::IndexType desiredStart;
@@ -349,6 +375,8 @@ int main( int argc, char *argv[] )
 		}
 #endif
 
+
+
 		ConvolutionFilterType::Pointer convolutionFilter1 = ConvolutionFilterType::New();
 		convolutionFilter1->SetInput(midres);
 		convolutionFilter1->SetKernelImage(kernel1);
@@ -365,45 +393,86 @@ int main( int argc, char *argv[] )
 		convolutionFilter4->SetInput(midres);
 		convolutionFilter4->SetKernelImage(kernel4);
 
+		// Now extract the features from the convolved images
+		ImageToFeatureConverter<KernelImageType> im2feat(scale, border, overlap, window);
+		std::vector<std::vector<KernelElementType> > featureMatrix1;
+		std::vector<std::vector<KernelElementType> > featureMatrix2;
+		std::vector<std::vector<KernelElementType> > featureMatrix3;
+		std::vector<std::vector<KernelElementType> > featureMatrix4;
 
-		// A radius of 1 in all axial directions gives a 3x3x3x3x... neighborhood.
-		NeighborhoodIterator::RadiusType radius;
-		radius.Fill(scale * window); // typically 9 by 9
+		// Get the individual feature matrices from the filtered images
+		// Later on, these matrices will be aggregated to the global
+		// feature matrix
+		convolutionFilter1->Update();
+		im2feat.GetOutput(convolutionFilter1->GetOutput(), featureMatrix1);
 
-		// define the region for the iterator
-		// get the original image size
-		ImageType::SizeType intrstSize = midres->GetLargestPossibleRegion().GetSize();
-
-		KernelImageType::IndexType itindex;
-		itindex[0] = 3;
-		itindex[1] = 3;
-		KernelImageType::RegionType itregion(itindex,itsize);
-		NeighborhoodIterator it(radius, test, itregion);
-		it.SetNeedToUseBoundaryCondition(true);
-		NeighborhoodIterator::OffsetType offset;
-		offset[0] = 6;
-		offset[1] = 0;
-		it.GoToBegin();
-		unsigned int c = it.Size() / 2;
-		while ( ! it.IsAtEnd() )
+		/**/
+		std::cout  << "*******" << std::endl << "Content of midres:" << std::endl;
+		ImageType::RegionType midresReg = midres->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<ImageType> imageIteratorMidres(midres, midresReg);
+		imageIteratorMidres.GoToBegin();
+		int oldRow = 0;
+		while(!imageIteratorMidres.IsAtEnd())
 		{
-			std::cout << "At index " << it.GetIndex() << "center is: ";
-			std::cout << it.GetCenterPixel() << "next is: " << it.GetPixel(c+1)<< std::endl;
-			itk::Index<2> curInd = it.GetIndex();
-
-			if(curInd[0] + offset[0] >= itsize[0] + itindex[0])
+			ImageType::IndexType curInd = imageIteratorMidres.GetIndex();
+			if(curInd[1] != oldRow)
 			{
-				NeighborhoodIterator::IndexType newPos;
-				newPos[0] = itindex[0];
-				newPos[1] = curInd[1] + 1;
-				it.SetLocation(newPos);
+				std::cout << std::endl;
+				oldRow = curInd[1];
 			}
-			else
-			{
-				it += offset;
-			}
+			std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+			std::cout << imageIteratorMidres.Get() << " ";
+			++imageIteratorMidres;
 		}
+		std::cout  << std::endl << "END Content of midres *******" << std::endl;
 
+		std::cout  << std::endl << "convolution 1 output:" << std::endl;
+		KernelImageType::RegionType region4 = convolutionFilter1->GetOutput()->GetLargestPossibleRegion();
+		itk::ImageRegionIterator<KernelImageType> imageIterator4(convolutionFilter1->GetOutput(), region4);
+		imageIterator4.GoToBegin();
+		oldRow = 0;
+		while(!imageIterator4.IsAtEnd())
+		{
+			ImageType::IndexType curInd = imageIterator4.GetIndex();
+			if(curInd[1] != oldRow)
+			{
+				std::cout << std::endl;
+				oldRow = curInd[1];
+			}
+			std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+			std::cout << imageIterator4.Get() << " ";
+			++imageIterator4;
+		}
+		std::cout  << std::endl << "-0-0-0-0-0-0-0-0-" << std::endl;
+
+		/*for(int hh = 0; hh < featureMatrix1.size(); hh++)
+		{
+			for(int tt = 0; tt < featureMatrix1[hh].size(); tt++)
+			{
+				std::cout << featureMatrix1[hh].at(tt) << ", ";
+			}
+			std::cout << "! "<<hh<< "! " <<std::endl;
+		}*/
+
+		convolutionFilter2->Update();
+		im2feat.GetOutput(convolutionFilter2->GetOutput(), featureMatrix2);
+
+		convolutionFilter3->Update();
+		im2feat.GetOutput(convolutionFilter3->GetOutput(), featureMatrix3);
+
+		convolutionFilter4->Update();
+		im2feat.GetOutput(convolutionFilter4->GetOutput(), featureMatrix4);
+
+
+		for(int feat = 0; feat < featureMatrix1.size(); feat++)
+		{
+			std::vector<KernelElementType> aggregatedFeatures;
+			aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix1[feat].begin(), featureMatrix1[feat].end() );
+			aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix2[feat].begin(), featureMatrix2[feat].end() );
+			aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix3[feat].begin(), featureMatrix3[feat].end() );
+			aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix4[feat].begin(), featureMatrix4[feat].end() );
+			globalFeatureMatrix.push_back(aggregatedFeatures);
+		}
 
 
 #ifdef FUNCTEST
@@ -426,6 +495,107 @@ int main( int argc, char *argv[] )
 #endif
 
 	}
+
+	// call ksvd train dataset
+	std::cout << "global feature matrix size = " << globalFeatureMatrix.size() << std::endl;
+	if(globalFeatureMatrix.size() > 0)
+		std::cout << "feature  size = " << globalFeatureMatrix[0].size() << std::endl;
+
+	unsigned int dimSpace = 10; // dimension space
+	unsigned int m = globalFeatureMatrix[0].size();   // dimension of each point
+	unsigned int n = globalFeatureMatrix.size();  // number of points
+
+	Eigen::MatrixXf DataPoints(m,n);
+	for (int j=0; j<DataPoints.cols(); ++j) // loop over columns
+		for (int i=0; i<DataPoints.rows(); ++i) // loop over rows
+			DataPoints(i,j) = globalFeatureMatrix[j].at(i);
+
+	float mean;
+	Eigen::VectorXf meanVector;
+
+	typedef std::pair<float, int> myPair;
+	typedef std::vector<myPair> PermutationIndices;
+
+
+	//
+	// for each point
+	//   center the poin with the mean among all the coordinates
+	//
+	for (int i = 0; i < DataPoints.cols(); i++)
+	{
+	   mean = (DataPoints.col(i).sum())/m;		 //compute mean
+	   meanVector  = Eigen::VectorXf::Constant(m,mean); // create a vector with constant value = mean
+	   DataPoints.col(i) -= meanVector;
+	   // std::cout << meanVector.transpose() << "\n" << DataPoints.col(i).transpose() << "\n\n";
+	}
+
+	// get the covariance matrix
+	Eigen::MatrixXf Covariance = Eigen::MatrixXf::Zero(m, m);
+	Covariance = (1 / (float) n) * DataPoints * DataPoints.transpose();
+	//std::cout << Covariance ;
+
+	// compute the eigenvalue on the Cov Matrix
+	Eigen::EigenSolver<Eigen::MatrixXf> m_solve(Covariance);
+	std::cout << "PCA Done";
+	Eigen::VectorXf eigenvalues = Eigen::VectorXf::Zero(m);
+	eigenvalues = m_solve.eigenvalues().real();
+
+	Eigen::MatrixXf eigenVectors = Eigen::MatrixXf::Zero(n, m);  // matrix (n x m) (points, dims)
+	eigenVectors = m_solve.eigenvectors().real();
+
+	// sort and get the permutation indices
+	PermutationIndices pi;
+	for (int i = 0 ; i < m; i++)
+	{
+		myPair mp;
+		mp.first = eigenvalues(i);
+		mp.second = i;
+		pi.push_back(mp);
+	}
+
+	sort(pi.begin(), pi.end());
+
+	Eigen::VectorXf sortedEigenValues(m);
+	Eigen::VectorXf eigenValuesCumSum(m);
+	Eigen::VectorXf eigenValuesCumPerc(m);
+
+	for (unsigned int i = 0; i < m ; i++)
+	{
+		sortedEigenValues(i) = pi[i].first < 0 ? 0 : pi[i].first;
+		if(i == 0)
+			eigenValuesCumSum(i) = sortedEigenValues(i);
+		else
+			eigenValuesCumSum(i) = eigenValuesCumSum(i-1) + sortedEigenValues(i);
+		//std::cout << "eigen=" << pi[i].first << " pi=" << pi[i].second << std::endl;
+	}
+
+	float eigenValuesSum = sortedEigenValues.sum();
+	//eigenValuesCumPerc = eigenValuesCumSum.cwiseQuotient(sortedEigenValues);
+	for (unsigned int i = 0; i < m ; i++)
+	{
+		eigenValuesCumPerc(i) = eigenValuesCumSum(i) / eigenValuesSum;
+		std::cout << "eigencumsum=" << eigenValuesCumPerc(i) << "\n";
+	}
+
+
+	// reconstruction:
+	// Patch = meanvector + SIGMA(eigenvalues(i) * eigenvectors(i))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 	return 0;
 }
