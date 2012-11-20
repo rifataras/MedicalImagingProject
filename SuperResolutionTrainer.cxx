@@ -521,12 +521,12 @@ int main( int argc, char *argv[] )
 	// for each point
 	//   center the poin with the mean among all the coordinates
 	//
+	/**/
 	for (int i = 0; i < DataPoints.cols(); i++)
 	{
-	   mean = (DataPoints.col(i).sum())/m;		 //compute mean
-	   meanVector  = Eigen::VectorXf::Constant(m,mean); // create a vector with constant value = mean
-	   DataPoints.col(i) -= meanVector;
-	   // std::cout << meanVector.transpose() << "\n" << DataPoints.col(i).transpose() << "\n\n";
+	   mean = (DataPoints.row(i).sum())/n;		 //compute mean
+	   meanVector  = Eigen::VectorXf::Constant(n,mean); // create a vector with constant value = mean
+	   DataPoints.row(i) -= meanVector;
 	}
 
 	// get the covariance matrix
@@ -537,11 +537,10 @@ int main( int argc, char *argv[] )
 	// compute the eigenvalue on the Cov Matrix
 	Eigen::EigenSolver<Eigen::MatrixXf> m_solve(Covariance);
 	std::cout << "PCA Done";
-	Eigen::VectorXf eigenvalues = Eigen::VectorXf::Zero(m);
-	eigenvalues = m_solve.eigenvalues().real();
+	Eigen::VectorXf eigenvalues = m_solve.eigenvalues().real();
+	Eigen::MatrixXf eigenVectors = m_solve.eigenvectors().real();
+	// std::cout << "sizeofeigenvectors: " << eigenVectors.rows() << ", " << eigenVectors.cols() << std::endl;
 
-	Eigen::MatrixXf eigenVectors = Eigen::MatrixXf::Zero(n, m);  // matrix (n x m) (points, dims)
-	eigenVectors = m_solve.eigenvectors().real();
 
 	// sort and get the permutation indices
 	PermutationIndices pi;
@@ -555,6 +554,9 @@ int main( int argc, char *argv[] )
 
 	sort(pi.begin(), pi.end());
 
+	/*for (unsigned int i = 0; i < m ; i++)
+		std::cout << "eigen= " << pi[i].first << " pi= " << pi[i].second << std::endl;
+	 */
 	Eigen::VectorXf sortedEigenValues(m);
 	Eigen::VectorXf eigenValuesCumSum(m);
 	Eigen::VectorXf eigenValuesCumPerc(m);
@@ -566,36 +568,34 @@ int main( int argc, char *argv[] )
 			eigenValuesCumSum(i) = sortedEigenValues(i);
 		else
 			eigenValuesCumSum(i) = eigenValuesCumSum(i-1) + sortedEigenValues(i);
-		//std::cout << "eigen=" << pi[i].first << " pi=" << pi[i].second << std::endl;
 	}
 
 	float eigenValuesSum = sortedEigenValues.sum();
-	//eigenValuesCumPerc = eigenValuesCumSum.cwiseQuotient(sortedEigenValues);
-	for (unsigned int i = 0; i < m ; i++)
+
+	std::cout << "print eigenvalues::" << std::endl;
+	std::vector<Eigen::VectorXf> highestEigenVectors;
+	for (unsigned int i = m-1; i > 0 ; i--)
 	{
 		eigenValuesCumPerc(i) = eigenValuesCumSum(i) / eigenValuesSum;
-		std::cout << "eigencumsum=" << eigenValuesCumPerc(i) << "\n";
+
+		if(eigenValuesCumPerc(i) > 0.05)
+		{
+			std::cout << eigenValuesCumPerc(i) << "\n";
+			highestEigenVectors.push_back(eigenVectors.col(pi[i].second));
+		}
+		else
+			break;
 	}
 
+	int numHighestEigenVectors = highestEigenVectors.size();
+	Eigen::MatrixXf V_pca(m, numHighestEigenVectors);
+	for(unsigned int i = 0; i < numHighestEigenVectors; i++)
+	{
+		V_pca.col(i) << highestEigenVectors[i];
+	}
 
-	// reconstruction:
-	// Patch = meanvector + SIGMA(eigenvalues(i) * eigenvectors(i))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	Eigen::MatrixXf features_pca = V_pca.transpose() * DataPoints;
+	std::cout << "features_pca: " << features_pca.rows() << "," << features_pca.cols() << "\n";
 
 	return 0;
 }
