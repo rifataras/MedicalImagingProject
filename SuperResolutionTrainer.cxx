@@ -597,5 +597,22 @@ int main( int argc, char *argv[] )
 	Eigen::MatrixXf features_pca = V_pca.transpose() * DataPoints;
 	std::cout << "features_pca: " << features_pca.rows() << "," << features_pca.cols() << "\n";
 
+	for(unsigned int i = 0; i < features_pca.cols(); i++)
+	{
+		std::cout << "norm of " << i << ": "<<features_pca.col(i).norm() << std::endl;
+	}
+
+	/******************************************************/
+	/***********KSVD***************************************/
+	typedef std::vector<std::vector<float> > matD_t;
+	typedef std::vector<std::vector<unsigned> > matU_t;
+	typedef std::vector<float> vecD_t;
+	typedef std::vector<unsigned> vecU_t;
+	typedef std::vector<float>::iterator iterD_t;
+	typedef std::vector<unsigned>::iterator iterU_t;
+
+	//matD_t reducedFeatures(features_pca, vecD_t(N1_2 * chnls));
+	//matD_t dictionary(N2, vecD_t(N1_2 * chnls));
+
 	return 0;
 }
