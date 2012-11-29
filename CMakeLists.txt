@@ -18,6 +18,6 @@ ENDIF(   VTK_FOUND   )
 include_directories ("${PROJECT_SOURCE_DIR}/FeatureExtractor")
 add_subdirectory (FeatureExtractor) 
 
-ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx)
+ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx lib_ormp.cpp lib_ormp.h lib_svd.cpp lib_svd.h)
 
 TARGET_LINK_LIBRARIES ( SupResTrainer FeatureExtractor ${ITK_LIBRARIES} ${VTK_LIBRARIES})

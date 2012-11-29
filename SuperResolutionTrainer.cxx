@@ -9,35 +9,51 @@
 #include "itkBSplineInterpolateImageFunction.h"
 #include "itkResampleImageFilter.h"
 
+#include "itkSubtractImageFilter.h"
+
 #include "itkConvolutionImageFilter.h"
 
 #include "ImageToFeatureConverter.h"
 #include "ImageToFeatureConverter.cxx" // !!! HACK! fix this later !!
 
+#include "lib_ormp.h"
+#include "lib_svd.h"
+
 #include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
 #include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
 
 // project specific preprocessor definitions
-//#define FUNCTEST // define this variable to test the functionality correctness
+#define FUNCTEST // define this variable to test the functionality correctness
 
 
 // typedefs
 typedef unsigned char 				PixelType;
 typedef itk::Image<PixelType, 2>	ImageType;
+typedef float					KernelElementType;
+typedef itk::Image<KernelElementType, 2>	KernelImageType;
+
+
 typedef itk::ExtractImageFilter< ImageType, ImageType > ExtractImageFilterType;
 typedef itk::ImageFileReader< ImageType > ReaderType;
-typedef itk::ImageFileWriter< ImageType > WriterType;
+typedef itk::ImageFileWriter< KernelImageType > WriterType;
 
 
 //typedefs for bicubic interpolation
 typedef itk::IdentityTransform<double, 2>  IdentityTransformType;
 typedef itk::BSplineInterpolateImageFunction<ImageType, double, double> InterpolatorType;
 typedef itk::ResampleImageFilter<ImageType, ImageType>   ResampleFilterType;
-
-// typedefs for feature extraction
-typedef float					KernelElementType;
-typedef itk::Image<KernelElementType, 2>	KernelImageType;
 typedef itk::ConvolutionImageFilter<ImageType, KernelImageType, KernelImageType> ConvolutionFilterType;
+
+// typedefs for image subtraction
+typedef itk::SubtractImageFilter<ImageType,ImageType,KernelImageType> SubtractImageFilterType;
+
+/***********KSVD***************************************/
+typedef std::vector<std::vector<float> > matD_t;
+typedef std::vector<std::vector<unsigned> > matU_t;
+typedef std::vector<float> vecD_t;
+typedef std::vector<unsigned> vecU_t;
+typedef std::vector<float>::iterator iterD_t;
+typedef std::vector<unsigned>::iterator iterU_t;
 
 
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
@@ -135,7 +151,323 @@ void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer ker
 	}
 }
 
+/**
+ * @brief Obtain random permutation for a tabular
+ *
+ * @param perm : will contain a random sequence of [1, ..., N]
+ *               where N is the size of perm.
+ *
+ * @return none.
+ **/
+void randperm(vecU_t &perm)
+{
+    //! Initializations
+    const unsigned N = perm.size();
+    vecU_t tmp(N + 1, 0);
+    tmp[1] = 1;
+    srand(unsigned(time(NULL)));
 
+    for (unsigned i = 2; i < N + 1; i++)
+    {
+        unsigned j = rand() % i + 1;
+        tmp[i] = tmp[j];
+        tmp[j] = i;
+    }
+
+    iterU_t it_t = tmp.begin() + 1;
+    for (iterU_t it_p = perm.begin(); it_p < perm.end(); it_p++, it_t++)
+        (*it_p) = (*it_t) - 1;
+}
+
+/**
+ * @brief Obtain the initial dictionary, which
+ *        its columns are normalized
+ *
+ * @param dictionary : will contain random patches from patches,
+ *                     with its columns normalized;
+ * @param patches : contains all patches in the noisy image.
+ *
+ * @return none.
+ **/
+void obtain_dict(matD_t         &dictionary,
+                 matD_t const&   patches)
+{
+    //! Declarations
+    vecU_t perm(patches.size());
+
+    std::cout << "1" << std::endl;
+
+    //! Obtain random indices
+    randperm(perm);
+
+    std::cout << "2" << std::endl;
+
+    //! Getting the initial random dictionary from patches
+    iterU_t it_p = perm.begin();
+    for (matD_t::iterator it_d = dictionary.begin(); it_d < dictionary.end();
+                                                                    it_d++, it_p++)
+        (*it_d) = patches[*it_p];
+
+    std::cout << "3" << std::endl;
+    //! Normalize column
+    double norm;
+    for (matD_t::iterator it = dictionary.begin(); it < dictionary.end(); it++)
+    {
+        norm = 0.0l;
+        for (iterD_t it_d = (*it).begin(); it_d < (*it).end(); it_d++)
+            norm += (*it_d) * (*it_d);
+
+        norm = 1 / sqrtl(norm);
+        for (iterD_t it_d = (*it).begin(); it_d < (*it).end(); it_d++)
+            (*it_d) *= norm;
+    }
+}
+
+/**
+ * @brief Apply the whole algorithm of K-SVD
+ *
+ * @param img_noisy : pointer to an allocated array containing
+ *                    the original noisy image;
+ * @param img_denoised : pointer to an allocated array which
+ *                       will contain the final denoised image;
+ * @param patches : matrix containing all patches including in
+ *                  img_noisy;
+ * @param dictionary : initial random dictionary, which will be
+ *                     updated in each iteration of the algo;
+ * @param sigma : noise value;
+ * @param N1 : size of patches (N1 x N1);
+ * @param N2 : number of atoms in the dictionary;
+ * @param N_iter : number of iteration;
+ * @param gamma : value used in the correction matrix in the
+ *                case of color image;
+ * @param C : coefficient used for the stopping criteria of
+ *            the ORMP;
+ * @param width : width of both images;
+ * @param height : height of both images;
+ * @param chnls : number of channels of both images;
+ * @param doReconstruction : if true, do the reconstruction of
+ *                           the final denoised image from patches
+ *                           (only in the case of the acceleration
+ *                            trick).
+ *
+ * @return none.
+ **/
+void ksvd_process(matD_t        &patches,
+                  matD_t        &dictionary,
+                  matD_t		&alpha,
+                  const unsigned N1, // size of features (i.e. 324)
+                  const unsigned N2, // size of the dictionary (i.e. 1000)
+                  const unsigned N_iter, // i.e. 40
+                  const double   C)
+{
+	//! Declarations
+	const unsigned N1_2 = N1;
+	const double   corr = 0; //(sqrtl(1.0l + gamma) - 1.0l) / ((double) N1_2);
+	const unsigned chnls = 1;
+	const double   eps  = ((double) (N1_2)) * C * C;
+	const unsigned h_p  = patches[0].size();
+	const unsigned w_p  = patches.size();
+
+	//! Mat & Vec initializations
+	matD_t dict_ormp   (N2 , vecD_t(h_p, 0.0l));
+	matD_t patches_ormp(w_p, vecD_t(h_p, 0.0l));
+	matD_t tmp         (h_p, vecD_t(N2, 0.0l));
+	vecD_t normCol     (N2);
+	matD_t Corr        (h_p, vecD_t(h_p, 0.0l));
+	vecD_t U           (h_p);
+	vecD_t V;
+	matD_t E           (w_p, vecD_t(h_p));
+
+	//! Vector for ORMP
+	matD_t ormp_val        (w_p, vecD_t ());
+	matU_t ormp_ind        (w_p, vecU_t ());
+	matD_t res_ormp        (N2, vecD_t (w_p));
+	matU_t omega_table     (N2, vecU_t ());
+	vecU_t omega_size_table(N2, 0);
+	//matD_t alpha           (N2, vecD_t ()); // this is a function parameter
+
+	//! To avoid reallocation of memory
+	for (unsigned k = 0; k < w_p; k++)
+	{
+		ormp_val[k].reserve(N2);
+		ormp_ind[k].reserve(N2);
+	}
+
+	for (matU_t::iterator it = omega_table.begin(); it < omega_table.end(); it++)
+		it->reserve(w_p);
+
+	V.reserve(w_p);
+
+	//! Correcting matrix
+	for (unsigned i = 0; i < h_p; i++)
+		Corr[i][i] = 1.0l;
+
+	for (unsigned c = 0; c < 1; c++)
+	{
+		matD_t::iterator it_Corr = Corr.begin() + N1_2 * c;
+		for (unsigned i = 0; i < N1_2; i++, it_Corr++)
+		{
+			iterD_t it = it_Corr->begin() + N1_2 * c;
+			for (unsigned j = 0; j < N1_2; j++, it++)
+				(*it) += corr;
+		}
+	}
+
+	#pragma omp parallel for
+	for (unsigned j = 0; j < w_p; j++)
+	{
+		for (unsigned c = 0; c < chnls; c++)
+		{
+			iterD_t it_ormp = patches_ormp[j].begin() + c * N1_2;
+			iterD_t it = patches[j].begin() + c * N1_2;
+			for (unsigned i = 0; i < N1_2; i++, it++, it_ormp++)
+			{
+				double val = 0.0l;
+				iterD_t it_tmp = patches[j].begin() + c * N1_2;
+				for (unsigned k = 0; k < N1_2; k++, it_tmp++)
+					val += corr * (*it_tmp);
+				(*it_ormp) = val + (*it);
+			}
+		}
+	}
+
+	//! Big loop
+	for (unsigned iter = 0; iter < N_iter; iter++)
+	{
+		std::cout << "Step " << iter + 1 << ":" << std::endl;
+		std::cout << " - Sparse coding" << std::endl;
+
+		for (unsigned i = 0; i < h_p; i++)
+		{
+			iterD_t it_tmp = tmp[i].begin();
+			for (unsigned j = 0; j < N2; j++, it_tmp++)
+			{
+				double val = 0.0l;
+				iterD_t it_corr_i = Corr[i].begin();
+				iterD_t it_dict_j = dictionary[j].begin();
+				for (unsigned k = 0; k < h_p; k++, it_corr_i++, it_dict_j++)
+					val += (*it_corr_i) * (*it_dict_j);
+				(*it_tmp) = val * val;
+			}
+		}
+
+		iterD_t it_normCol = normCol.begin();
+		for (unsigned j = 0; j < N2; j++, it_normCol++)
+		{
+			double val = 0.0l;
+			for (unsigned i = 0; i < h_p; i++)
+				val += tmp[i][j];
+			(*it_normCol) = 1.0l / sqrtl(val);
+		}
+
+		for (unsigned i = 0; i < h_p; i++)
+		{
+			iterD_t it_normCol_j = normCol.begin();
+			for (unsigned j = 0; j < N2; j++, it_normCol_j++)
+			{
+				double val = 0.0l;
+				iterD_t it_corr_i  = Corr[i].begin();
+				iterD_t it_dict_j = dictionary[j].begin();
+				for (unsigned k = 0; k < h_p; k++, it_corr_i++, it_dict_j++)
+					val += (*it_corr_i) * (*it_dict_j);
+				dict_ormp[j][i] = val * (*it_normCol_j);
+			}
+		}
+
+		//! ORMP process
+		std::cout << " - ORMP process" << std::endl;
+		ormp_process(patches_ormp, dict_ormp, ormp_ind, ormp_val, N2, eps);
+
+		for (unsigned i = 0; i < w_p; i++)
+		{
+			iterU_t it_ind = ormp_ind[i].begin();
+			iterD_t it_val = ormp_val[i].begin();
+			const unsigned size = ormp_val[i].size();
+			for (unsigned j = 0; j < size; j++, it_ind++, it_val++)
+				(*it_val) *= normCol[*it_ind];
+		}
+
+		//! Residus
+		for (unsigned i = 0; i < N2; i++)
+		{
+			omega_size_table[i] = 0;
+			omega_table[i].clear();
+			alpha[i].clear();
+			for (iterD_t it = res_ormp[i].begin(); it < res_ormp[i].end(); it++)
+				*it = 0.0l;
+		}
+
+		for (unsigned i = 0; i < w_p; i++)
+		{
+			iterU_t it_ind = ormp_ind[i].begin();
+			iterD_t it_val = ormp_val[i].begin();
+			for (unsigned j = 0; j < ormp_val[i].size(); j++, it_ind++, it_val++)
+			{
+				omega_table[*it_ind].push_back(i);
+				omega_size_table[*it_ind]++;
+				alpha[*it_ind].push_back(*it_val);
+				res_ormp[*it_ind][i] = *it_val;
+			}
+		}
+
+		//! Dictionary update
+		std::cout << " - Dictionary update" << std::endl;
+		for (unsigned l = 0; l < N2; l++)
+		{
+			//! Initializations
+			const unsigned omega_size = omega_size_table[l];
+			iterD_t it_dict_l = dictionary[l].begin();
+			iterD_t it_alpha_l = alpha[l].begin();
+			iterU_t it_omega_l = omega_table[l].begin();
+			U.assign(U.size(), 0.0l);
+
+			if (omega_size > 0)
+			{
+				iterD_t it_a = it_alpha_l;
+				iterU_t it_o = it_omega_l;
+				for (unsigned j = 0; j < omega_size; j++, it_a++, it_o++)
+				{
+					iterD_t it_d = it_dict_l;
+					iterD_t it_e = E[j].begin();
+					iterD_t it_p = patches[*it_o].begin();
+					for (unsigned i = 0; i < h_p; i++, it_d++, it_e++, it_p++)
+						(*it_e) = (*it_p) + (*it_d) * (*it_a);
+				}
+
+				matD_t::iterator it_res = res_ormp.begin();
+				for (unsigned k = 0; k < N2; k++, it_res++)
+				{
+					iterU_t it_o = it_omega_l;
+					iterD_t it_dict_k = dictionary[k].begin();
+					for (unsigned j = 0; j < omega_size; j++, it_o++)
+					{
+						const double val = (*it_res)[*it_o];
+						if (fabs(val) > 0.0l)
+						{
+							iterD_t it_d = it_dict_k;
+							iterD_t it_e = E[j].begin();
+							for (unsigned i = 0; i < h_p; i++, it_d++, it_e++)
+								(*it_e) -= (*it_d) * val;
+						}
+					}
+				}
+
+				//! SVD truncated
+				V.resize(omega_size);
+				double S = svd_trunc(E, U, V);
+
+				dictionary[l] = U;
+
+				it_a = it_alpha_l;
+				iterD_t it_v = V.begin();
+				it_o = it_omega_l;
+				for (unsigned j = 0; j < omega_size; j++, it_a++, it_v++, it_o++)
+					res_ormp[l][*it_o] = (*it_a) = (*it_v) * S;
+			}
+		}
+		std::cout << " - done." << std::endl;
+	}
+}
 
 int main( int argc, char *argv[] )
 {
@@ -172,6 +504,7 @@ int main( int argc, char *argv[] )
 
 	// The feature vector from the convolved images
 	std::vector<std::vector<KernelElementType> > globalFeatureMatrix;
+	std::vector<std::vector<KernelElementType> > globalPatchMatrix;
 
 	// The big for loop in which the training images are processed
 	for(int i = 0; i < numberOfFiles; i++)
@@ -324,6 +657,15 @@ int main( int argc, char *argv[] )
 		ImageType::Pointer midres = _pResizeFilter->GetOutput();
 		// at this point, we have the blurred versions in midres
 
+		// lets subtract the blurred image from the original
+		// hires image to obtain the high frequencies
+		SubtractImageFilterType::Pointer subtractFilter
+		    = SubtractImageFilterType::New ();
+		subtractFilter->SetInput1(image);
+		subtractFilter->SetInput2(midres);
+		subtractFilter->Update();
+		KernelImageType::Pointer differential = subtractFilter->GetOutput();
+
 		// defining the kernels to be used for the feature extraction
 		KernelImageType::Pointer kernel1 = KernelImageType::New();
 		KernelImageType::Pointer kernel2 = KernelImageType::New();
@@ -399,60 +741,16 @@ int main( int argc, char *argv[] )
 		std::vector<std::vector<KernelElementType> > featureMatrix2;
 		std::vector<std::vector<KernelElementType> > featureMatrix3;
 		std::vector<std::vector<KernelElementType> > featureMatrix4;
+		std::vector<std::vector<KernelElementType> > patchesMatrix;
 
 		// Get the individual feature matrices from the filtered images
 		// Later on, these matrices will be aggregated to the global
 		// feature matrix
+		subtractFilter->Update();
+		im2feat.GetOutput(subtractFilter->GetOutput(), patchesMatrix);
+
 		convolutionFilter1->Update();
 		im2feat.GetOutput(convolutionFilter1->GetOutput(), featureMatrix1);
-
-		/**/
-		std::cout  << "*******" << std::endl << "Content of midres:" << std::endl;
-		ImageType::RegionType midresReg = midres->GetLargestPossibleRegion();
-		itk::ImageRegionIterator<ImageType> imageIteratorMidres(midres, midresReg);
-		imageIteratorMidres.GoToBegin();
-		int oldRow = 0;
-		while(!imageIteratorMidres.IsAtEnd())
-		{
-			ImageType::IndexType curInd = imageIteratorMidres.GetIndex();
-			if(curInd[1] != oldRow)
-			{
-				std::cout << std::endl;
-				oldRow = curInd[1];
-			}
-			std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
-			std::cout << imageIteratorMidres.Get() << " ";
-			++imageIteratorMidres;
-		}
-		std::cout  << std::endl << "END Content of midres *******" << std::endl;
-
-		std::cout  << std::endl << "convolution 1 output:" << std::endl;
-		KernelImageType::RegionType region4 = convolutionFilter1->GetOutput()->GetLargestPossibleRegion();
-		itk::ImageRegionIterator<KernelImageType> imageIterator4(convolutionFilter1->GetOutput(), region4);
-		imageIterator4.GoToBegin();
-		oldRow = 0;
-		while(!imageIterator4.IsAtEnd())
-		{
-			ImageType::IndexType curInd = imageIterator4.GetIndex();
-			if(curInd[1] != oldRow)
-			{
-				std::cout << std::endl;
-				oldRow = curInd[1];
-			}
-			std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
-			std::cout << imageIterator4.Get() << " ";
-			++imageIterator4;
-		}
-		std::cout  << std::endl << "-0-0-0-0-0-0-0-0-" << std::endl;
-
-		/*for(int hh = 0; hh < featureMatrix1.size(); hh++)
-		{
-			for(int tt = 0; tt < featureMatrix1[hh].size(); tt++)
-			{
-				std::cout << featureMatrix1[hh].at(tt) << ", ";
-			}
-			std::cout << "! "<<hh<< "! " <<std::endl;
-		}*/
 
 		convolutionFilter2->Update();
 		im2feat.GetOutput(convolutionFilter2->GetOutput(), featureMatrix2);
@@ -462,6 +760,102 @@ int main( int argc, char *argv[] )
 
 		convolutionFilter4->Update();
 		im2feat.GetOutput(convolutionFilter4->GetOutput(), featureMatrix4);
+
+
+		/*
+				{
+				std::cout  << "*******" << std::endl << "Content of image:" << std::endl;
+				ImageType::RegionType imageReg = image->GetLargestPossibleRegion();
+				itk::ImageRegionIterator<ImageType> imageIteratorImage(image, imageReg);
+				imageIteratorImage.GoToBegin();
+				int oldRow = 0;
+				while(!imageIteratorImage.IsAtEnd())
+				{
+					ImageType::IndexType curInd = imageIteratorImage.GetIndex();
+					if(curInd[1] != oldRow)
+					{
+						std::cout << std::endl;
+						oldRow = curInd[1];
+					}
+					std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+					std::cout << (int)imageIteratorImage.Get() << " ";
+					++imageIteratorImage;
+				}
+				std::cout  << std::endl << "END Content of image *******" << std::endl;
+				}
+
+				std::cout  << "*******" << std::endl << "Content of midres:" << std::endl;
+				ImageType::RegionType midresReg = midres->GetLargestPossibleRegion();
+				itk::ImageRegionIterator<ImageType> imageIteratorMidres(midres, midresReg);
+				imageIteratorMidres.GoToBegin();
+				int oldRow = 0;
+				while(!imageIteratorMidres.IsAtEnd())
+				{
+					ImageType::IndexType curInd = imageIteratorMidres.GetIndex();
+					if(curInd[1] != oldRow)
+					{
+						std::cout << std::endl;
+						oldRow = curInd[1];
+					}
+					std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+					std::cout << (int)imageIteratorMidres.Get() << " ";
+					++imageIteratorMidres;
+				}
+				std::cout  << std::endl << "END Content of midres *******" << std::endl;
+
+				{
+				std::cout  << "*******" << std::endl << "Content of differential:" << std::endl;
+				ImageType::RegionType midresReg = differential->GetLargestPossibleRegion();
+				itk::ImageRegionIterator<KernelImageType> imageIteratorMidres(differential, midresReg);
+				imageIteratorMidres.GoToBegin();
+				int oldRow = 0;
+				while(!imageIteratorMidres.IsAtEnd())
+				{
+					ImageType::IndexType curInd = imageIteratorMidres.GetIndex();
+					if(curInd[1] != oldRow)
+					{
+						std::cout << std::endl;
+						oldRow = curInd[1];
+					}
+					std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+					std::cout << (float)imageIteratorMidres.Get() << " ";
+					++imageIteratorMidres;
+				}
+				std::cout  << std::endl << "END Content of differential *******" << std::endl;
+				}
+				*/
+
+				/*std::cout  << std::endl << "convolution 1 output:" << std::endl;
+				KernelImageType::RegionType region4 = convolutionFilter1->GetOutput()->GetLargestPossibleRegion();
+				itk::ImageRegionIterator<KernelImageType> imageIterator4(convolutionFilter1->GetOutput(), region4);
+				imageIterator4.GoToBegin();
+				oldRow = 0;
+				while(!imageIterator4.IsAtEnd())
+				{
+					ImageType::IndexType curInd = imageIterator4.GetIndex();
+					if(curInd[1] != oldRow)
+					{
+						std::cout << std::endl;
+						oldRow = curInd[1];
+					}
+					std::cout << "[" << curInd[1] << "," << curInd[0] << "]: ";
+					std::cout << imageIterator4.Get() << " ";
+					++imageIterator4;
+				}
+				std::cout  << std::endl << "-0-0-0-0-0-0-0-0-" << std::endl;
+				*/
+				/*for(int hh = 0; hh < featureMatrix1.size(); hh++)
+				{
+					for(int tt = 0; tt < featureMatrix1[hh].size(); tt++)
+					{
+						std::cout << featureMatrix1[hh].at(tt) << ", ";
+					}
+					std::cout << "! "<<hh<< "! " <<std::endl;
+				}*/
+
+
+
+
 
 
 		for(int feat = 0; feat < featureMatrix1.size(); feat++)
@@ -474,6 +868,11 @@ int main( int argc, char *argv[] )
 			globalFeatureMatrix.push_back(aggregatedFeatures);
 		}
 
+		for(int patc = 0; patc < patchesMatrix.size(); patc++)
+		{
+			globalPatchMatrix.push_back(patchesMatrix[patc]);
+		}
+
 
 #ifdef FUNCTEST
 		char *testpath = (char*)malloc(4 + strlen(filename) + 2);
@@ -483,12 +882,12 @@ int main( int argc, char *argv[] )
 			return -1;
 		}
 
-		sprintf(testpath, "test%s", filename);
+		sprintf(testpath, "testoutput.mhd", filename);
 
 		// Write the result
 		WriterType::Pointer pWriter = WriterType::New();
 		pWriter->SetFileName(testpath);
-		pWriter->SetInput(convolutionFilter2->GetOutput());
+		pWriter->SetInput(subtractFilter->GetOutput());
 		pWriter->Update();
 		free(testpath);
 		std::cout << "**************************************" << std::endl;
@@ -604,15 +1003,73 @@ int main( int argc, char *argv[] )
 
 	/******************************************************/
 	/***********KSVD***************************************/
-	typedef std::vector<std::vector<float> > matD_t;
-	typedef std::vector<std::vector<unsigned> > matU_t;
-	typedef std::vector<float> vecD_t;
-	typedef std::vector<unsigned> vecU_t;
-	typedef std::vector<float>::iterator iterD_t;
-	typedef std::vector<unsigned>::iterator iterU_t;
 
-	//matD_t reducedFeatures(features_pca, vecD_t(N1_2 * chnls));
-	//matD_t dictionary(N2, vecD_t(N1_2 * chnls));
+	const int dictionarySize = 5;
+	matD_t reducedFeatures(features_pca.cols(), vecD_t(features_pca.rows()));
+	matD_t dictionary(dictionarySize, vecD_t(features_pca.rows()));
+	matD_t alpha(dictionarySize, vecD_t ());
+
+	// convert the features matrix from Eigen representation
+	// to the matD_t representation.
+	for(unsigned int i = 0; i < features_pca.cols(); i++)
+	{
+		for(unsigned int r = 0; r < features_pca.rows(); r++)
+		{
+			reducedFeatures[i].at(r) = features_pca(r,i);
+		}
+	}
+
+	std::cout << "about to call obtain_dict" << std::endl;
+
+	obtain_dict(dictionary, reducedFeatures);
+
+	std::cout << "about to call ksvd_process" << std::endl;
+
+	ksvd_process(reducedFeatures, dictionary, alpha, features_pca.rows(), dictionarySize, 40, 1.1139195378939404);
+
+//	std::cout << std::endl << "!!printing dictionary!!" << std::endl;
+//	for(int i = 0; i < dictionary.size(); i++)
+//	{
+//		for(int j = 0; j < dictionary[0].size(); j++)
+//		{
+//			std::cout << dictionary[i].at(j) << ", ";
+//		}
+//		std::cout << std::endl;
+//	}
+
+	std::cout << std::endl << "alpha matrix size: " << alpha.size() << ", " << alpha[0].size() << std::endl;
+	std::cout << std::endl << "patches matrix size: " << globalPatchMatrix.size() << ", " << globalPatchMatrix[0].size() << std::endl;
+
+	// Find hires  dictionary
+	// convert the matrices to Eigen representation
+	// from the matD_t representation for Eigen's operations.
+	Eigen::MatrixXf Q_Matrix(alpha.size(), alpha[0].size());
+	Eigen::MatrixXf P_Matrix(globalPatchMatrix[0].size(), globalPatchMatrix.size());
+
+	for(unsigned int i = 0; i < Q_Matrix.rows(); i++)
+	{
+		for(unsigned int j = 0; j < Q_Matrix.cols(); j++)
+		{
+			Q_Matrix(i,j) = alpha[i].at(j);
+		}
+	}
+
+	std::cout << "here is Q:" << std::endl << Q_Matrix << std::endl;
+
+	for(unsigned int i = 0; i < P_Matrix.rows(); i++)
+	{
+		for(unsigned int j = 0; j < P_Matrix.cols(); j++)
+		{
+			P_Matrix(i,j) = globalPatchMatrix[j].at(i);
+		}
+	}
+
+	std::cout << "here is P:" << std::endl << P_Matrix << std::endl;
+
+	Eigen::MatrixXf QQT = Q_Matrix * Q_Matrix.transpose();
+	Eigen::MatrixXf A_h = P_Matrix * Q_Matrix.transpose() * QQT.inverse();
+
+	std::cout << "here is Ah:" << std::endl << A_h << std::endl;
 
 	return 0;
 }
