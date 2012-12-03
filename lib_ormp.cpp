@@ -49,7 +49,7 @@ void ormp_process(matD_t      &X,
                   matD_t      &D,
                   matU_t      &ind_v,
                   matD_t      &val_v,
-                  unsigned     L,
+                  unsigned     L,  //maxımal sparsıty allowed
                   const double eps)
 {
     //! Declarations
@@ -109,6 +109,7 @@ void ormp_process(matD_t      &X,
                     x_T[j] = (double)val;
                 }
 
+                //std::cout << "calling coreORMP for i = " << i << std::endl;
                 coreORMP(D, D_D, scores, norm, A, D_ELj, D_DLj, x_T,
                                             ind_v[i], val_v[i], eps, (double) normX);
 
@@ -188,6 +189,7 @@ void coreORMP(matD_t      &D,
         const long double delta = x_elj * x_elj;
 
         x_el.push_back(x_elj);
+        //std::cout << x_elj << ", ";
         coord.push_back(x_elj); //! The coordinate of x on the last chosen vector
         normr  = (double) ((long double) normr - delta);//! Update of the residual
         ind.push_back(lj); //! Memorize the chosen index

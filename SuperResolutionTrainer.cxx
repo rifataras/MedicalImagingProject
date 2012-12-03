@@ -16,6 +16,12 @@
 #include "ImageToFeatureConverter.h"
 #include "ImageToFeatureConverter.cxx" // !!! HACK! fix this later !!
 
+#include "itkCastImageFilter.h"
+
+#include "itkAddImageFilter.h"
+
+#include "itkChangeInformationImageFilter.h"
+
 #include "lib_ormp.h"
 #include "lib_svd.h"
 
@@ -35,7 +41,7 @@ typedef itk::Image<KernelElementType, 2>	KernelImageType;
 
 typedef itk::ExtractImageFilter< ImageType, ImageType > ExtractImageFilterType;
 typedef itk::ImageFileReader< ImageType > ReaderType;
-typedef itk::ImageFileWriter< KernelImageType > WriterType;
+typedef itk::ImageFileWriter< ImageType > WriterType;
 
 
 //typedefs for bicubic interpolation
@@ -55,6 +61,31 @@ typedef std::vector<unsigned> vecU_t;
 typedef std::vector<float>::iterator iterD_t;
 typedef std::vector<unsigned>::iterator iterU_t;
 
+
+void CreateImage(KernelImageType::Pointer image, int width, int height)
+{
+	std::cout << "21" << std::endl;
+	// Create an image with 2 connected components
+	KernelImageType::IndexType start;
+	start[0] = 0;
+	start[1] = 0;
+
+	std::cout << "22" << std::endl;
+	KernelImageType::SizeType size;
+	size[0] = width;
+	size[1] = height;
+
+	std::cout << "23" << std::endl;
+	KernelImageType::RegionType region(start, size);
+
+	std::cout << "24" << std::endl;
+	image->SetRegions(region);
+	std::cout << "25" << std::endl;
+	image->Allocate();
+	std::cout << "26" << std::endl;
+	image->FillBuffer( itk::NumericTraits<KernelImageType::PixelType>::Zero);
+	std::cout << "27" << std::endl;
+}
 
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
 		KernelImageType::Pointer kernel3,KernelImageType::Pointer kernel4,int scale)
@@ -872,27 +903,6 @@ int main( int argc, char *argv[] )
 		{
 			globalPatchMatrix.push_back(patchesMatrix[patc]);
 		}
-
-
-#ifdef FUNCTEST
-		char *testpath = (char*)malloc(4 + strlen(filename) + 2);
-		if (testpath == NULL)
-		{
-			std::cerr << "Could not allocate memory for the fullpath. " << std::endl;
-			return -1;
-		}
-
-		sprintf(testpath, "testoutput.mhd", filename);
-
-		// Write the result
-		WriterType::Pointer pWriter = WriterType::New();
-		pWriter->SetFileName(testpath);
-		pWriter->SetInput(subtractFilter->GetOutput());
-		pWriter->Update();
-		free(testpath);
-		std::cout << "**************************************" << std::endl;
-#endif
-
 	}
 
 	// call ksvd train dataset
@@ -909,6 +919,7 @@ int main( int argc, char *argv[] )
 		for (int i=0; i<DataPoints.rows(); ++i) // loop over rows
 			DataPoints(i,j) = globalFeatureMatrix[j].at(i);
 
+	std::cout << "kill 1 " << m << ", " << n <<  std::endl;
 	float mean;
 	Eigen::VectorXf meanVector;
 
@@ -921,18 +932,21 @@ int main( int argc, char *argv[] )
 	//   center the poin with the mean among all the coordinates
 	//
 	/**/
-	for (int i = 0; i < DataPoints.cols(); i++)
+	for (int i = 0; i < DataPoints.rows(); i++)
 	{
 	   mean = (DataPoints.row(i).sum())/n;		 //compute mean
 	   meanVector  = Eigen::VectorXf::Constant(n,mean); // create a vector with constant value = mean
 	   DataPoints.row(i) -= meanVector;
 	}
 
+	std::cout << "kill 2" <<  std::endl;
+
 	// get the covariance matrix
 	Eigen::MatrixXf Covariance = Eigen::MatrixXf::Zero(m, m);
 	Covariance = (1 / (float) n) * DataPoints * DataPoints.transpose();
 	//std::cout << Covariance ;
 
+	std::cout << "kill 3" <<  std::endl;
 	// compute the eigenvalue on the Cov Matrix
 	Eigen::EigenSolver<Eigen::MatrixXf> m_solve(Covariance);
 	std::cout << "PCA Done";
@@ -1025,7 +1039,11 @@ int main( int argc, char *argv[] )
 
 	std::cout << "about to call ksvd_process" << std::endl;
 
-	ksvd_process(reducedFeatures, dictionary, alpha, features_pca.rows(), dictionarySize, 40, 1.1139195378939404);
+	const double C = 1.1139195378939404;
+	const int numOfIterations = 10;
+	const double   eps  = ((double) (features_pca.rows())) * C * C;
+	ksvd_process(reducedFeatures, dictionary, alpha, features_pca.rows(), dictionarySize, numOfIterations, C);
+
 
 //	std::cout << std::endl << "!!printing dictionary!!" << std::endl;
 //	for(int i = 0; i < dictionary.size(); i++)
@@ -1054,7 +1072,7 @@ int main( int argc, char *argv[] )
 		}
 	}
 
-	std::cout << "here is Q:" << std::endl << Q_Matrix << std::endl;
+	//std::cout << "here is Q:" << std::endl << Q_Matrix << std::endl;
 
 	for(unsigned int i = 0; i < P_Matrix.rows(); i++)
 	{
@@ -1064,12 +1082,342 @@ int main( int argc, char *argv[] )
 		}
 	}
 
-	std::cout << "here is P:" << std::endl << P_Matrix << std::endl;
+	//std::cout << "here is P:" << std::endl << P_Matrix << std::endl;
 
 	Eigen::MatrixXf QQT = Q_Matrix * Q_Matrix.transpose();
 	Eigen::MatrixXf A_h = P_Matrix * Q_Matrix.transpose() * QQT.inverse();
 
-	std::cout << "here is Ah:" << std::endl << A_h << std::endl;
+	//std::cout << "here is Ah:" << std::endl << A_h << std::endl;
 
+
+
+	// NOW the reconstruction phase
+
+
+	const char *filename = "Clipboard01.bmp";
+	ReaderType::Pointer readerRecon = ReaderType::New();
+	readerRecon->SetFileName( filename );
+	try
+	{
+		readerRecon->UpdateLargestPossibleRegion();
+	}
+	catch ( itk::ExceptionObject &err)
+	{
+		std::cerr << "ExceptionObject caught? !" << std::endl;
+		std::cerr << err << std::endl;
+		//free(filename);
+		return -1;
+	}
+	//free(filename);
+
+	readerRecon->Update();
+	ImageType::Pointer image = readerRecon->GetOutput();
+	ImageType::RegionType region = image->GetLargestPossibleRegion();
+	ImageType::SizeType size = region.GetSize();
+
+	// First, we want to crop the file so that its horizontal
+	// and vertical sizes are multiples of the scale value (modcrop)
+	ImageType::IndexType desiredStart;
+	desiredStart.Fill(0);
+	ImageType::SizeType desiredSize;
+	desiredSize[0] = size[0] - (size[0] % scale);
+	desiredSize[1] = size[1] - (size[1] % scale);
+	ImageType::RegionType desiredRegion(desiredStart, desiredSize);
+
+	ExtractImageFilterType::Pointer filter = ExtractImageFilterType::New();
+	filter->SetExtractionRegion(desiredRegion);
+	filter->SetInput(image);
+	filter->Update();
+
+	// we can override the original image as we are going
+	// to work on this from now on. because of the smart pointers,
+	// there should not be any memory leak.
+	image = filter->GetOutput();
+	// modcrop completed at this point. image has the cropped image data
+/*
+	{
+
+		typedef itk::CastImageFilter< ImageType, KernelImageType > CastFilterType;
+		CastFilterType::Pointer castFilter = CastFilterType::New();
+		castFilter->SetInput(image);
+		castFilter->Update();
+		ImageToFeatureConverter<KernelImageType> im2feat(scale, border, 0, 10);
+		std::vector<std::vector<KernelElementType> > patchesMatrix;
+		im2feat.GetOutput(castFilter->GetOutput(), patchesMatrix);
+
+		std::cout << "!!!!\npatchesMatrix: " << patchesMatrix.size() << ", " << patchesMatrix[0].size() << std::endl;
+
+		KernelImageType::Pointer reconstructedImage = KernelImageType::New();
+		KernelImageType::Pointer denominatorImage = KernelImageType::New();
+		CreateImage(reconstructedImage, desiredSize[0], desiredSize[1]);
+		CreateImage(denominatorImage, desiredSize[0], desiredSize[1]);
+
+		im2feat.GetImageBack(reconstructedImage,denominatorImage,patchesMatrix);
+		typedef itk::CastImageFilter< KernelImageType, ImageType > CastFilterType2;
+		CastFilterType2::Pointer castFilter2 = CastFilterType2::New();
+		castFilter2->SetInput(reconstructedImage);
+		castFilter2->Update();
+		ImageType::Pointer reconstructedBMP = castFilter2->GetOutput();
+
+		#ifdef FUNCTEST
+			char *testpath = (char*)malloc(4 + strlen(filename) + 2);
+			if (testpath == NULL)
+			{
+				std::cerr << "Could not allocate memory for the fullpath. " << std::endl;
+				return -1;
+			}
+
+			sprintf(testpath, "recons.bmp", filename);
+
+			// Write the result
+			WriterType::Pointer pWriter = WriterType::New();
+			pWriter->SetFileName(testpath);
+			pWriter->SetInput(reconstructedBMP);
+			pWriter->Update();
+			free(testpath);
+			std::cout << "**************************************" << std::endl;
+
+#endif
+
+
+
+
+	}
+
+	return 0;
+
+	*/
+
+	// Now we need to upscale the image to feed it to feature extractor
+	// Instantiate the b-spline interpolator and set it as the third order
+	// for bicubic.
+	InterpolatorType::Pointer _pInterpolator = InterpolatorType::New();
+	_pInterpolator->SetSplineOrder(3);
+
+	// Instantiate the resampler. Wire in the transform and the interpolator.
+	ResampleFilterType::Pointer _pResizeFilter = ResampleFilterType::New();
+	_pResizeFilter->SetInterpolator(_pInterpolator);
+
+	const double vfOutputOrigin[2]  = { 0.0, 0.0 };
+	_pResizeFilter->SetOutputOrigin(vfOutputOrigin);
+
+	// Fetch original image size.
+	const ImageType::RegionType& inputRegion = image->GetLargestPossibleRegion();
+	const ImageType::SizeType& vnInputSize = inputRegion.GetSize();
+	unsigned int nOldWidth = vnInputSize[0];
+	unsigned int nOldHeight = vnInputSize[1];
+
+	unsigned int nNewWidth = vnInputSize[0]*scale;
+	unsigned int nNewHeight = vnInputSize[1]*scale;
+
+	// Fetch original image spacing.
+	const ImageType::SpacingType& vfInputSpacing = image->GetSpacing();
+
+	double vfOutputSpacing[2];
+	vfOutputSpacing[0] = vfInputSpacing[0] * (double) nOldWidth / (double) nNewWidth;
+	vfOutputSpacing[1] = vfInputSpacing[1] * (double) nOldHeight / (double) nNewHeight;
+
+	_pResizeFilter->SetOutputSpacing(vfOutputSpacing);
+	ResampleFilterType::SizeType vnOutputSize = { {nNewWidth, nNewHeight} };
+	_pResizeFilter->SetSize(vnOutputSize);
+	_pResizeFilter->SetInput(image);
+	_pResizeFilter->Update();
+	ImageType::Pointer midres = _pResizeFilter->GetOutput();
+
+
+	typedef itk::ChangeInformationImageFilter <ImageType > SpacingFilterType;
+	SpacingFilterType::Pointer SpacingFilter = SpacingFilterType::New();
+
+	ImageType::SpacingType spacing;
+	spacing[0] = 1;
+	spacing[1] = 1;
+
+	SpacingFilter->ChangeSpacingOn();
+	SpacingFilter->SetOutputSpacing(spacing);
+
+	SpacingFilter->SetInput( midres );
+	SpacingFilter->Update();
+	midres = SpacingFilter->GetOutput();
+
+
+	// now apply the filters to obtain the patches
+	// defining the kernels to be used for the feature extraction
+	KernelImageType::Pointer kernel1 = KernelImageType::New();
+	KernelImageType::Pointer kernel2 = KernelImageType::New();
+	KernelImageType::Pointer kernel3 = KernelImageType::New();
+	KernelImageType::Pointer kernel4 = KernelImageType::New();
+
+	CreateKernels(kernel1, kernel2, kernel3, kernel4, scale);
+
+	ConvolutionFilterType::Pointer convolutionFilter1 = ConvolutionFilterType::New();
+	convolutionFilter1->SetInput(midres);
+	convolutionFilter1->SetKernelImage(kernel1);
+
+	ConvolutionFilterType::Pointer convolutionFilter2 = ConvolutionFilterType::New();
+	convolutionFilter2->SetInput(midres);
+	convolutionFilter2->SetKernelImage(kernel2);
+
+	ConvolutionFilterType::Pointer convolutionFilter3 = ConvolutionFilterType::New();
+	convolutionFilter3->SetInput(midres);
+	convolutionFilter3->SetKernelImage(kernel3);
+
+	ConvolutionFilterType::Pointer convolutionFilter4 = ConvolutionFilterType::New();
+	convolutionFilter4->SetInput(midres);
+	convolutionFilter4->SetKernelImage(kernel4);
+
+	// Now extract the features from the convolved images
+	ImageToFeatureConverter<KernelImageType> im2feat(scale, border, overlap, window);
+	std::vector<std::vector<KernelElementType> > featureMatrix1;
+	std::vector<std::vector<KernelElementType> > featureMatrix2;
+	std::vector<std::vector<KernelElementType> > featureMatrix3;
+	std::vector<std::vector<KernelElementType> > featureMatrix4;
+	std::vector<std::vector<KernelElementType> > patchesMatrix;
+
+	convolutionFilter1->Update();
+	im2feat.GetOutput(convolutionFilter1->GetOutput(), featureMatrix1);
+
+	convolutionFilter2->Update();
+	im2feat.GetOutput(convolutionFilter2->GetOutput(), featureMatrix2);
+
+	convolutionFilter3->Update();
+	im2feat.GetOutput(convolutionFilter3->GetOutput(), featureMatrix3);
+
+	convolutionFilter4->Update();
+	im2feat.GetOutput(convolutionFilter4->GetOutput(), featureMatrix4);
+
+
+	std::vector<std::vector<KernelElementType> > reconFeatureMatrix;
+
+	for(int feat = 0; feat < featureMatrix1.size(); feat++)
+	{
+		std::vector<KernelElementType> aggregatedFeatures;
+		aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix1[feat].begin(), featureMatrix1[feat].end() );
+		aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix2[feat].begin(), featureMatrix2[feat].end() );
+		aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix3[feat].begin(), featureMatrix3[feat].end() );
+		aggregatedFeatures.insert( aggregatedFeatures.end(), featureMatrix4[feat].begin(), featureMatrix4[feat].end() );
+		reconFeatureMatrix.push_back(aggregatedFeatures);
+	}
+
+	Eigen::MatrixXf featureMat(reconFeatureMatrix[0].size(), reconFeatureMatrix.size());
+	for(unsigned int i = 0; i < featureMat.rows(); i++)
+	{
+		for(unsigned int j = 0; j < featureMat.cols(); j++)
+		{
+			featureMat(i,j) = reconFeatureMatrix[j].at(i);
+		}
+	}
+
+	Eigen::MatrixXf reducedReconFeatures = V_pca.transpose() * featureMat;
+
+	matD_t reducedReconFeat(reducedReconFeatures.cols(), vecD_t(reducedReconFeatures.rows()));
+
+	// convert the features matrix from Eigen representation
+	// to the matD_t representation.
+	for(unsigned int i = 0; i < reducedReconFeatures.cols(); i++)
+	{
+		for(unsigned int r = 0; r < reducedReconFeatures.rows(); r++)
+		{
+			reducedReconFeat[i].at(r) = reducedReconFeatures(r,i);
+		}
+	}
+
+	int w_p = reducedReconFeat.size();
+	matD_t ormp_val (w_p, vecD_t ());
+	matU_t ormp_ind (w_p, vecU_t ());
+	std::cout << "pre omp info: 1): " << reducedReconFeat[0].size() << ", " << reducedReconFeat.size()
+			<< " \n2): " << dictionary[0].size() << ", " << dictionary.size()
+			<< std::endl;
+	ormp_process(reducedReconFeat, dictionary, ormp_ind, ormp_val, dictionarySize, eps);
+
+	std::cout << "\"q\" values size: " << ormp_val[0].size() << ", " << ormp_val.size() << std::endl;
+
+	Eigen::MatrixXf reconQMatrix(ormp_val[0].size(), ormp_val.size());
+	for(unsigned int i = 0; i < reconQMatrix.rows(); i++)
+	{
+		for(unsigned int j = 0; j < reconQMatrix.cols(); j++)
+		{
+			//std::cout << i << ", " << j << ": " << ormp_val[j].at(i) << std::endl;
+			if(ormp_val[j].size() < ormp_val[0].size())
+			{
+				reconQMatrix(i,j) = 0;
+			}
+			else
+			{
+				reconQMatrix(i,j) = ormp_val[j].at(i);
+			}
+		}
+	}
+
+	std::cout << "12" << std::endl;
+
+	Eigen::MatrixXf reconstructedPatches = A_h * reconQMatrix;
+
+	float mmax = reconstructedPatches.maxCoeff();
+	float mmin = reconstructedPatches.minCoeff();
+
+	std::cout << mmax << " ! " << mmin << std::endl;
+
+	std::vector<std::vector<KernelElementType> > reconPatchesVector(reconstructedPatches.cols(), std::vector<KernelElementType>(reconstructedPatches.rows()));
+	// convert the reconstructed patches to vector<vector<PixelType>>
+	for(unsigned int i = 0; i < reconstructedPatches.cols(); i++)
+	{
+		for(unsigned int r = 0; r < reconstructedPatches.rows(); r++)
+		{
+			reconPatchesVector[i].at(r) = reconstructedPatches(r,i);
+		}
+	}
+
+	std::cout << "13" << std::endl;
+
+	KernelImageType::Pointer reconstructedImage = KernelImageType::New();
+	KernelImageType::Pointer denominatorImage = KernelImageType::New();
+	CreateImage(reconstructedImage, nNewWidth, nNewHeight);
+	CreateImage(denominatorImage, nNewWidth, nNewHeight);
+
+	std::cout << "14" << std::endl;
+	im2feat.GetImageBack(reconstructedImage, denominatorImage,reconPatchesVector);
+
+
+	// Now add the reconstructed image to the previous interpolated
+	// image (that is midres)
+	typedef itk::CastImageFilter< ImageType, KernelImageType > Int2FloatFilterType;
+	Int2FloatFilterType::Pointer i2fFilter = Int2FloatFilterType::New();
+	i2fFilter->SetInput(midres);
+	i2fFilter->Update();
+
+
+	typedef itk::AddImageFilter <KernelImageType > AddImageFilterType;
+	AddImageFilterType::Pointer addFilter = AddImageFilterType::New ();
+	addFilter->SetInput1(i2fFilter->GetOutput());
+	addFilter->SetInput2(reconstructedImage);
+	addFilter->Update();
+
+	typedef itk::CastImageFilter< KernelImageType, ImageType > CastFilterType;
+	CastFilterType::Pointer castFilter = CastFilterType::New();
+	castFilter->SetInput(addFilter->GetOutput());
+	castFilter->Update();
+	ImageType::Pointer reconstructedBMP = castFilter->GetOutput();
+
+#ifdef FUNCTEST
+	char *testpath = (char*)malloc(4 + strlen(filename) + 2);
+	if (testpath == NULL)
+	{
+		std::cerr << "Could not allocate memory for the fullpath. " << std::endl;
+		return -1;
+	}
+
+	sprintf(testpath, "recons.bmp", filename);
+
+	// Write the result
+	WriterType::Pointer pWriter = WriterType::New();
+	pWriter->SetFileName(testpath);
+	pWriter->SetInput(reconstructedBMP);
+	pWriter->Update();
+	free(testpath);
+	std::cout << "**************************************" << std::endl;
+#endif
+
+
+	std::cout << "voila" << std::endl;
 	return 0;
 }
