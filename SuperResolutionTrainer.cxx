@@ -34,6 +34,10 @@
 #include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
 #include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
 
+//KR version
+//#include <C:\Users\msve\Downloads\MedicalImagingProject-master\MedicalImagingProjects\Eigen\Core>
+//#include <C:\Users\msve\Downloads\MedicalImagingProject-master\MedicalImagingProjects\Eigen\Eigen>
+
 // project specific preprocessor definitions
 #define FUNCTEST // define this variable to test the functionality correctness
 
