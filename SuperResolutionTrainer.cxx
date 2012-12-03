@@ -1,3 +1,9 @@
+#if defined(_WIN32) || defined(_WIN64)
+
+#include <time.h>
+
+#endif
+
 #include "itkImage.h"
 #include "itkImageFileReader.h"
 #include "itkImageFileWriter.h"
