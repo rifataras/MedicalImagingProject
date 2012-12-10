@@ -583,9 +583,9 @@ int main( int argc, char *argv[] )
 	int window = ::atoi(argv[3]);
 	int overlap = ::atoi(argv[4]);
 	int border = ::atoi(argv[5]);
-	const int dictionarySize = 1000;
+	const int dictionarySize = 500;
 	const double C = 1.1139195378939404;
-	const int numOfIterations = 40;
+	const int numOfIterations = 20;
 	double   eps;
 
 	Eigen::MatrixXf V_pca;	// Dimension reduction matrix (B)
@@ -1163,13 +1163,20 @@ int main( int argc, char *argv[] )
 		Eigen::MatrixXf QQT = Q_Matrix * Q_Matrix.transpose();
 		A_h = P_Matrix * Q_Matrix.transpose() * QQT.inverse();
 
-		std::cout << "here is Ah:" << std::endl << A_h << std::endl;
+		//std::cout << "here is Ah:" << std::endl << A_h << std::endl;
 
-
+		//Crashing upon saving for larger dictionary size
 		// SAVE THE NECESSARY MATRICES TO USE LATER ON
+		
+		#if defined(_WIN32) || defined(_WIN64)
+		
+		#else if
+
 		save("V_pca.krmat", V_pca);
 		save("A_l.krmat", A_l);
 		save("A_h.krmat", A_h);
+
+		#endif
 	}
 	else	// training is not performed, read the matrices and reconstruct
 	{
