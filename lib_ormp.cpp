@@ -36,7 +36,7 @@ using namespace std;
  * @brief compute an Orthogonal Recursive Matching Pursuit
  *
  * @param X : (Np x n) X[i] is the vector to be represented in D
- * @param D : (k x n)	 dictionary (D[j] is the j-th atom)
+ * @param D : (k x n)  dictionary (D[j] is the j-th atom)
  * @param A : (k x Np) sparse coordinates : A[j][i] is the
  *            coordinate of X[i] on D[j]
  **/
@@ -85,7 +85,7 @@ void ormp_process(matD_t      &X,
         }
 
         #pragma omp for schedule(dynamic) nowait
-            for (unsigned i = 0; i < Np; ++i)
+            for (int i = 0; i < Np; ++i)
             {
                 //! Initialization
                 ind_v[i].clear();
