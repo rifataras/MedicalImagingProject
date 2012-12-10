@@ -32,12 +32,12 @@
 #include "lib_svd.h"
 
 //RA version
-#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
-#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
+//#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
+//#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
 
 //KR version
-//#include <C:\Users\msve\Downloads\MedicalImagingProject-master\MedicalImagingProjects\Eigen\Core>
-//#include <C:\Users\msve\Downloads\MedicalImagingProject-master\MedicalImagingProjects\Eigen\Eigen>
+#include "Eigen\Core"
+#include "Eigen\Eigen"
 
 // project specific preprocessor definitions
 #define FUNCTEST // define this variable to test the functionality correctness
@@ -372,7 +372,7 @@ void ksvd_process(matD_t        &patches,
 	}
 
 	#pragma omp parallel for
-	for (unsigned j = 0; j < w_p; j++)
+	for (int j = 0; j < w_p; j++)
 	{
 		for (unsigned c = 0; c < chnls; c++)
 		{
@@ -583,9 +583,9 @@ int main( int argc, char *argv[] )
 	int window = ::atoi(argv[3]);
 	int overlap = ::atoi(argv[4]);
 	int border = ::atoi(argv[5]);
-	const int dictionarySize = 50;
+	const int dictionarySize = 500;
 	const double C = 1.1139195378939404;
-	const int numOfIterations = 2;
+	const int numOfIterations = 20;
 	double   eps;
 
 	Eigen::MatrixXf V_pca;	// Dimension reduction matrix (B)
@@ -1195,7 +1195,7 @@ int main( int argc, char *argv[] )
 	// NOW the reconstruction phase
 
 
-	const char *filename = "face.bmp";
+	const char *filename = "test_reconstr.bmp";
 	ReaderType::Pointer readerRecon = ReaderType::New();
 	readerRecon->SetFileName( filename );
 	try
