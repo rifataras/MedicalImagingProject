@@ -583,9 +583,9 @@ int main( int argc, char *argv[] )
 	int window = ::atoi(argv[3]);
 	int overlap = ::atoi(argv[4]);
 	int border = ::atoi(argv[5]);
-	const int dictionarySize = 500;
+	const int dictionarySize = 1000;
 	const double C = 1.1139195378939404;
-	const int numOfIterations = 20;
+	const int numOfIterations = 40;
 	double   eps;
 
 	Eigen::MatrixXf V_pca;	// Dimension reduction matrix (B)
