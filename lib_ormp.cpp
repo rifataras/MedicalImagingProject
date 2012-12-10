@@ -110,7 +110,7 @@ void ormp_process(matD_t      &X,
                 }
 
                 if(i % 1000 == 0)
-                	std::cout << "calling coreORMP for i = " << i << "of " << Np << std::endl;
+                	std::cout << "calling coreORMP for i = " << i << " of " << Np << std::endl;
                 coreORMP(D, D_D, scores, norm, A, D_ELj, D_DLj, x_T,
                                             ind_v[i], val_v[i], eps, (double) normX);
 
