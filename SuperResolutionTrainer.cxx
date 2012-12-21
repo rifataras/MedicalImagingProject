@@ -15,12 +15,17 @@
 #include "itkBSplineInterpolateImageFunction.h"
 #include "itkResampleImageFilter.h"
 
+#include "CreateImage.h"
+//#include "CreateImage.cpp"
+
 #include "itkSubtractImageFilter.h"
 
 #include "itkConvolutionImageFilter.h"
 
 #include "ImageToFeatureConverter.h"
 #include "ImageToFeatureConverter.cxx" // !!! HACK! fix this later !!
+
+
 
 #include "itkCastImageFilter.h"
 
@@ -99,24 +104,6 @@ void load(const char *filename, Eigen::MatrixXf& m)
 	//if (f.bad())
 	//throw std::exception("Error reading matrix");
 	f.close();
-}
-
-void CreateImage(KernelImageType::Pointer image, int width, int height)
-{
-	// Create an image with 2 connected components
-	KernelImageType::IndexType start;
-	start[0] = 0;
-	start[1] = 0;
-
-	KernelImageType::SizeType size;
-	size[0] = width;
-	size[1] = height;
-
-	KernelImageType::RegionType region(start, size);
-
-	image->SetRegions(region);
-	image->Allocate();
-	image->FillBuffer( itk::NumericTraits<KernelImageType::PixelType>::Zero);
 }
 
 void CreateKernels(KernelImageType::Pointer kernel1,KernelImageType::Pointer kernel2,
