@@ -1,4 +1,11 @@
 #include "ksvd.h"
+#include <stdlib.h>
+#if defined(_WIN32) || defined(_WIN64)
+
+#include <time.h>
+
+#endif
+#include <math.h>
 
 /**
  * @brief Obtain random permutation for a tabular

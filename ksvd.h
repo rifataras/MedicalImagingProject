@@ -3,11 +3,6 @@
 
 #include <iostream>
 
-#if defined(_WIN32) || defined(_WIN64)
-
-#include <time.h>
-
-#endif
 #include "lib_ormp.h"
 #include "lib_svd.h"
 

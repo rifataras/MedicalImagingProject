@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8)
 
 PROJECT( SupResTrainer )
 
-#set(ITK_DIR "/home/rifat/Apps/ITK/InsightToolkit-4.2.0b/")
+set(ITK_DIR "/home/rifat/Apps/ITK/InsightToolkit-4.2.0b/")
 #set(VTK_DIR "/home/rifat/Apps/VTK5_10/VTKb/")
 
 FIND_PACKAGE ( ITK REQUIRED)
@@ -16,8 +16,9 @@ ENDIF(   ITK_FOUND   )
 #ENDIF(   VTK_FOUND   )
 
 include_directories ("${PROJECT_SOURCE_DIR}/FeatureExtractor")
+include_directories ("${PROJECT_SOURCE_DIR}")
 add_subdirectory (FeatureExtractor) 
 
-ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx lib_ormp.cpp lib_ormp.h lib_svd.cpp lib_svd.h)
+ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx CreateImage.cpp CreateImage.h CreateKernels.cpp CreateKernels.h ksvd.cpp ksvd.h lib_ormp.cpp lib_ormp.h lib_svd.cpp lib_svd.h)
 
 TARGET_LINK_LIBRARIES ( SupResTrainer FeatureExtractor ${ITK_LIBRARIES})
