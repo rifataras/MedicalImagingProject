@@ -39,13 +39,8 @@
 //#include "lib_ormp.h"
 //#include "lib_svd.h"
 
-//RA version
-//#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Core>
-//#include </home/rifat/workspace/CourseProjectFiles/MedicalImagingProject/Eigen/Eigen>
-
-//KR version
-#include "Eigen\Core"
-#include "Eigen\Eigen"
+#include "Eigen/Core"
+#include "Eigen/Eigen"
 
 // project specific preprocessor definitions
 #define FUNCTEST // define this variable to test the functionality correctness
