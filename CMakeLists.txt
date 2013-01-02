@@ -18,6 +18,6 @@ ENDIF(   ITK_FOUND   )
 include_directories ("${PROJECT_SOURCE_DIR}/FeatureExtractor")
 add_subdirectory (FeatureExtractor) 
 
-ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx lib_ormp.cpp lib_ormp.h lib_svd.cpp lib_svd.h)
+ADD_EXECUTABLE( SupResTrainer   SuperResolutionTrainer.cxx lib_ormp.cpp lib_ormp.h lib_svd.cpp lib_svd.h ksvd.cpp ksvd.h CreateImage.cpp CreateImage.h CreateKernels.cpp CreateKernels.h)
 
 TARGET_LINK_LIBRARIES ( SupResTrainer FeatureExtractor ${ITK_LIBRARIES})
